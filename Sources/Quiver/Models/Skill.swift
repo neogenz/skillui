@@ -61,8 +61,14 @@ struct Skill: Identifiable, Sendable, Equatable {
     /// True when we have any provenance (a lockfile entry).
     var isTracked: Bool { lock?.source != nil }
 
-    /// True when update detection via GitHub tree SHA is possible.
-    var canCheckUpdate: Bool { lock?.source != nil && lock?.skillPath != nil && lock?.skillFolderHash != nil }
+    /// True when update detection is possible: a global skill with a stored git tree SHA, or a
+    /// project-local real folder (whose git tree SHA we compute locally), as long as we know the
+    /// source repo + path.
+    var canCheckUpdate: Bool {
+        guard lock?.source != nil, lock?.skillPath != nil else { return false }
+        if lock?.skillFolderHash != nil { return true }   // global: has a git tree SHA
+        return linkType == .projectLocal                   // project-local: compute from disk
+    }
 
     /// Repo folder containing the skill — parent of `skillPath` (which points to SKILL.md).
     /// Returns "" when SKILL.md is at the repo root (handled as the root tree).

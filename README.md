@@ -59,8 +59,9 @@ NOTARY_PROFILE="quiver-notary" scripts/make-dmg.sh   # signed + notarized
 
 ## Limitations (MVP)
 
-- Update detection needs a git tree-SHA, which only the **global** lock stores. Project
-  skills (`computedHash` only) and skills not installed via the CLI show as *untracked*.
-- Project scope is opt-in: add project folders in Settings (the CLI only lists the cwd's
-  project, so Quiver can't enumerate them for you).
+- Update detection: global skills compare the lockfile's git tree-SHA; **project-local**
+  skills compute their folder's git tree-SHA on disk and compare to upstream (so they're
+  updatable too). Skills not installed from a known source still show as *untracked*.
+- First multi-project scan reads every project-local skill folder to hash it (then cached by
+  a metadata signature, so re-scans are cheap). It runs in the background; globals show first.
 - The GitHub PAT lives in the Keychain; everything else is UserDefaults.

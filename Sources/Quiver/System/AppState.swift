@@ -207,6 +207,15 @@ final class AppState {
         discoveredProjects = projects
         projectScanSkills = found.sorted(by: Self.order)
         lastProjectScanAt = Date()
+
+        // Evaluate update status for comparable project skills (project-local via local git
+        // tree SHA, grouped per repo). Linked-global skills are mapped via effectiveStatus.
+        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        let comparable = projectScanSkills.filter { $0.canCheckUpdate }
+        if !comparable.isEmpty {
+            let results = await checker.evaluate(comparable)
+            for (id, st) in results { statuses[id] = st }
+        }
     }
 
     /// All skills for the dashboard: global (CLI-accurate) + recursively-scanned project skills.

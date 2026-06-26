@@ -32,11 +32,11 @@ struct UpdateChecker: Sendable {
             let tree = await treeMap(repo: repo, storedRef: storedRef, ttl: ttl, force: force)
 
             for s in group {
-                let installed = s.lock!.skillFolderHash!
                 switch tree {
                 case .failed(let msg):
                     out[s.id] = .failed(msg)
                 case .ok(let map, let root):
+                    guard let installed = await installedTreeSHA(for: s) else { out[s.id] = .unsupported; continue }
                     let folder = s.repoFolder ?? ""
                     let latest = folder.isEmpty ? root : map[folder]
                     out[s.id] = Self.decide(installed: installed, latest: latest)
@@ -44,6 +44,19 @@ struct UpdateChecker: Sendable {
             }
         }
         return out
+    }
+
+    /// Installed folder tree SHA: the lockfile's git tree SHA if present (global), else the
+    /// git tree SHA computed from the local folder (project-local), cached by signature.
+    private func installedTreeSHA(for s: Skill) async -> String? {
+        if let h = s.lock?.skillFolderHash, !h.isEmpty { return h }
+        guard s.linkType == .projectLocal else { return nil }
+        let url = URL(fileURLWithPath: s.path)
+        let sig = GitTreeHasher.signature(url)
+        if let cached = await cache?.localTree(s.path), cached.signature == sig { return cached.sha }
+        guard let sha = GitTreeHasher.treeSHA(url) else { return nil }
+        await cache?.setLocalTree(s.path, .init(signature: sig, sha: sha))
+        return sha
     }
 
     private enum TreeOutcome {

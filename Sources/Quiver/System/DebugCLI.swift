@@ -23,6 +23,12 @@ enum DebugCLI {
             exit(0)
         }
 
+        // Local git tree-SHA probe: `--tree-sha <folder>`.
+        if let i = args.firstIndex(of: "--tree-sha"), i + 1 < args.count {
+            print(GitTreeHasher.treeSHA(URL(fileURLWithPath: args[i + 1])) ?? "nil")
+            exit(0)
+        }
+
         // Recursive multi-project scan probe: `--scan-projects [root]`.
         if let i = args.firstIndex(of: "--scan-projects") {
             let root = (i + 1 < args.count && !args[i + 1].hasPrefix("--"))
@@ -35,8 +41,14 @@ enum DebugCLI {
                 for p in projects { print("  • \(p)") }
                 let skills = FilesystemScanner(globalRoots: globalRoots).scan(projectRoots: projects)
                 print("project skills: \(skills.count)")
+                var statuses: [String: UpdateStatus] = [:]
+                if args.contains("--check") {
+                    statuses = await UpdateChecker(token: nil).evaluate(skills)
+                }
                 for s in skills.sorted(by: { $0.name < $1.name }) {
-                    print("  [\(s.linkType.rawValue)] \(s.name)  src:\(s.source ?? "—")  proj:\(s.projectName ?? "-")  agents:\(s.agents.joined(separator: ","))")
+                    var line = "  [\(s.linkType.rawValue)] \(s.name)  src:\(s.source ?? "—")  proj:\(s.projectName ?? "-")"
+                    if let st = statuses[s.id] { line += "  → \(st)" }
+                    print(line)
                 }
                 sem.signal()
             }

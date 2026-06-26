@@ -49,9 +49,12 @@ tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`) coo
   list by name. (XDG override: `$XDG_STATE_HOME/skills/.skill-lock.json` — matches the CLI source.)
 - `skillPath` points at **SKILL.md**; the repo folder is its parent (`""` = repo root).
 - Update detection: `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`, match the entry whose
-  `path` == the skill folder & `type == "tree"`, compare its `sha` to `skillFolderHash`. Lockfiles
-  usually omit `ref` → resolve the default branch. Only skills with a `skillFolderHash` are
-  checkable; `computedHash`-only and untracked skills degrade gracefully.
+  `path` == the skill folder & `type == "tree"`, compare its `sha` to the installed git tree SHA.
+  Lockfiles usually omit `ref` → resolve the default branch. **Global** skills use the stored
+  `skillFolderHash`; **project-local** skills (lock has only a sha256 `computedHash`) compute the
+  folder's git tree SHA on disk via `GitTreeHasher` (CryptoKit SHA-1, byte-compatible with git;
+  signature-cached so re-scans skip unchanged folders). Linked-global project skills map to their
+  global counterpart; untracked / external-symlink skills aren't checkable.
 - skills.sh page URL is `https://skills.sh/{source}` (NOT `/skills/{source}`). GitHub repo =
   `sourceUrl` minus `.git`.
 - Never run `skills update` to *check* — it mutates. Detection is GitHub-tree-SHA only.

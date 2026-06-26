@@ -95,6 +95,35 @@ private func tempDir() throws -> URL {
     #expect(w.mainRepo == "pulpe-workspace")
 }
 
+@Test func gitTreeHasherIsDeterministicAndDetectsChange() throws {
+    let fm = FileManager.default
+    let dir = try tempDir()
+    try "hello".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    try fm.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+    try "world".write(to: dir.appendingPathComponent("sub/b.txt"), atomically: true, encoding: .utf8)
+
+    let sha1 = GitTreeHasher.treeSHA(dir)
+    #expect(sha1?.count == 40)                                  // 40-hex git tree SHA
+    #expect(GitTreeHasher.treeSHA(dir) == sha1)                 // deterministic
+
+    let sigBefore = GitTreeHasher.signature(dir)
+    try "changed".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    #expect(GitTreeHasher.treeSHA(dir) != sha1)                 // content change → different SHA
+    #expect(GitTreeHasher.signature(dir) != sigBefore)         // and signature invalidates
+}
+
+@Test func projectLocalSkillIsUpdateCheckable() {
+    // computedHash-only, but a real local folder → checkable (we compute the tree SHA on disk).
+    let lock = LockEntry(source: "me/repo", skillPath: "skills/x/SKILL.md", computedHash: "deadbeef")
+    let local = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
+                      agents: ["Shared"], projectPath: "/p", lock: lock, linkType: .projectLocal)
+    #expect(local.canCheckUpdate)
+    // same lock but a symlink elsewhere → not checkable
+    let external = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
+                         agents: ["Shared"], projectPath: "/p", lock: lock, linkType: .linkedExternal)
+    #expect(!external.canCheckUpdate)
+}
+
 @Test func skillProjectLabelShowsWorktreeUnderMainRepo() {
     let s = Skill(name: "x", path: "/p/marseille/.agents/skills/x", scope: .project,
                   agents: ["Shared"], projectPath: "/p/marseille", lock: nil,
