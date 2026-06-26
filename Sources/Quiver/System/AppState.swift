@@ -11,8 +11,11 @@ final class AppState {
     var statuses: [String: UpdateStatus] = [:]   // skill.id → status
     var isScanning = false
     var isCheckingUpdates = false
+    var hasScannedOnce = false
     var lastError: String?
     var cliMissing = false
+    var updatingSkillIDs: Set<String> = []
+    var lastCheckedAt: Date?
 
     // MARK: Settings (persisted to UserDefaults)
 
@@ -73,6 +76,47 @@ final class AppState {
         // Prune statuses for skills that disappeared.
         let liveIDs = Set(skills.map(\.id))
         statuses = statuses.filter { liveIDs.contains($0.key) }
+        hasScannedOnce = true
+    }
+
+    /// Full refresh: rescan + recheck updates (cache-guarded unless forced).
+    func refresh(force: Bool = false) async {
+        await scan()
+        await checkUpdates(force: force)
+        lastCheckedAt = Date()
+    }
+
+    // MARK: Actions (mutating — user-initiated only)
+
+    /// `skills update <name>` for one skill, then rescan + recheck so the badge clears.
+    func updateSkill(_ skill: Skill) async {
+        guard let invocation = await resolveCLI() else { return }
+        updatingSkillIDs.insert(skill.id)
+        defer { updatingSkillIDs.remove(skill.id) }
+        do {
+            try await SkillsCLI(invocation: invocation)
+                .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
+            await scan()
+            await checkUpdates(force: true)
+        } catch {
+            lastError = "Update failed for \(skill.name): \(error.localizedDescription)"
+        }
+    }
+
+    /// Update every skill currently flagged `updateAvailable`, then a single rescan/recheck.
+    func updateAll() async {
+        guard let invocation = await resolveCLI() else { return }
+        let cli = SkillsCLI(invocation: invocation)
+        let targets = skills.filter { statuses[$0.id] == .updateAvailable }
+        guard !targets.isEmpty else { return }
+        for t in targets {
+            updatingSkillIDs.insert(t.id)
+            do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
+            catch { lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
+            updatingSkillIDs.remove(t.id)
+        }
+        await scan()
+        await checkUpdates(force: true)
     }
 
     func checkUpdates(force: Bool = false) async {
