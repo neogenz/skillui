@@ -6,6 +6,7 @@ import AppKit
 /// worktrees grouped under their main repo.
 struct DashboardView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.openSettings) private var openSettings
 
     @State private var search = ""
     @State private var scopeFilter: ScopeFilter = .all
@@ -20,6 +21,7 @@ struct DashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+            if app.isRateLimited && app.githubPAT.isEmpty { rateLimitBanner }
             Divider()
             table
         }
@@ -70,8 +72,20 @@ struct DashboardView: View {
         .padding(10)
     }
 
+    private var rateLimitBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.statusWarn)
+            Text("GitHub rate limit reached — update checks are incomplete. Add a personal access token (5000 req/hr) to finish.")
+                .font(.system(size: 11))
+            Spacer()
+            Button("Add token") { app.requestPATFocus = true; openSettings() }.controlSize(.small)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.statusWarn.opacity(0.12))
+    }
+
     private var rootChip: some View {
-        let root = app.scanRoot.isEmpty ? "~" : (app.scanRoot as NSString).abbreviatingWithTildeInPath
+        let root = app.scanRoot.isEmpty ? "Dev folders" : (app.scanRoot as NSString).abbreviatingWithTildeInPath
         return Button {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.prompt = "Scan here"

@@ -10,12 +10,16 @@ struct ProjectFinder: Sendable {
     var homeOverrideForTesting: String? = nil
 
     static let skip: Set<String> = [
-        "node_modules", ".git", ".svn", ".hg", "Library", "Applications", ".build", "build",
+        "node_modules", ".git", ".svn", ".hg", ".build", "build",
         "DerivedData", "Pods", "dist", "out", ".next", ".nuxt", ".cache", ".venv", "venv",
         "__pycache__", ".gradle", ".npm", ".cargo", "vendor", ".Trash", "target", ".terraform",
         // Global agent config dirs — the global skills live here but they are NOT projects.
         ".claude", ".codex", ".cursor", ".agents", ".config", ".vibe", ".hermes",
         ".deepagents", ".gemini", ".local",
+        // macOS TCC-protected / personal folders — NEVER enter these (they'd trigger a privacy
+        // prompt and projects don't live there). Skipped by name so we never list their contents.
+        "Library", "Applications", "Documents", "Desktop", "Downloads", "Music", "Pictures",
+        "Movies", "Public", "Mobile Documents", "Creative Cloud Files",
     ]
     static let markers = [".agents/skills", ".claude/skills", ".codex/skills", ".cursor/skills"]
 

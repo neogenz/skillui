@@ -16,6 +16,8 @@ final class AppState {
     var cliMissing = false
     var updatingSkillIDs: Set<String> = []
     var lastCheckedAt: Date?
+    /// Set by the rate-limit banner so Settings focuses the PAT field on open.
+    var requestPATFocus = false
 
     // Recursive multi-project scan (Dashboard)
     var projectScanSkills: [Skill] = []
@@ -194,15 +196,18 @@ final class AppState {
            Date().timeIntervalSince(last) < max(0.25, refreshIntervalHours) * 3600 { return }
         isScanningProjects = true
         defer { isScanningProjects = false }
-        let rootPath = scanRoot.isEmpty
-            ? FileManager.default.homeDirectoryForCurrentUser.path
-            : (scanRoot as NSString).expandingTildeInPath
+        // Default to known dev-project roots (never the whole home — that would touch
+        // ~/Documents, ~/Music, ~/Pictures, … and trigger macOS privacy prompts).
+        let roots: [String] = scanRoot.isEmpty
+            ? Self.defaultDevRoots()
+            : [(scanRoot as NSString).expandingTildeInPath]
         let globalRoots = LinkClassifier.defaultGlobalRoots(
             customGlobalRoot: globalSkillsRootOverride.isEmpty ? nil : globalSkillsRootOverride)
-        let finder = ProjectFinder(root: rootPath)
         let scanner = FilesystemScanner(globalRoots: globalRoots)
         // FS walk + enumeration are synchronous — run off the main actor.
-        let projects = await Task.detached(priority: .utility) { finder.find() }.value
+        let projects = await Task.detached(priority: .utility) {
+            roots.flatMap { ProjectFinder(root: $0).find() }
+        }.value
         let found = await Task.detached(priority: .utility) { scanner.scan(projectRoots: projects) }.value
         discoveredProjects = projects
         projectScanSkills = found.sorted(by: Self.order)
@@ -213,9 +218,28 @@ final class AppState {
         let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
         let comparable = projectScanSkills.filter { $0.canCheckUpdate }
         if !comparable.isEmpty {
+            for s in comparable where statuses[s.id] != .updateAvailable { statuses[s.id] = .checking }
             let results = await checker.evaluate(comparable)
             for (id, st) in results { statuses[id] = st }
         }
+    }
+
+    /// True when any update check failed due to GitHub rate limiting — surfaced as a banner
+    /// suggesting a personal access token.
+    var isRateLimited: Bool {
+        statuses.values.contains {
+            if case .failed(let m) = $0 { return m.localizedCaseInsensitiveContains("rate limit") }
+            return false
+        }
+    }
+
+    /// Common dev-project roots under home, scanned by default. Avoids the whole home (and its
+    /// macOS-protected ~/Documents, ~/Music, ~/Pictures, …). Set a custom root in Settings to override.
+    static func defaultDevRoots() -> [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let names = ["workspace", "Developer", "dev", "Projects", "projects",
+                     "code", "Code", "src", "git", "repos", "work", "Sites"]
+        return names.map { "\(home)/\($0)" }.filter { FileManager.default.fileExists(atPath: $0) }
     }
 
     /// All skills for the dashboard: global (CLI-accurate) + recursively-scanned project skills.
@@ -236,11 +260,14 @@ final class AppState {
     // MARK: Actions (mutating — user-initiated only)
 
     /// `skills update <name>` for one skill, then rescan + recheck so the badge clears.
+    /// Marks the row "updating" immediately (before the serial queue) so a click during an
+    /// in-flight update gives instant feedback instead of appearing to do nothing.
     func updateSkill(_ skill: Skill) async {
+        guard !updatingSkillIDs.contains(skill.id) else { return }   // ignore repeat clicks
+        updatingSkillIDs.insert(skill.id)
         await serialize {
-            guard let invocation = await self.resolveCLI() else { return }
-            self.updatingSkillIDs.insert(skill.id)
             defer { self.updatingSkillIDs.remove(skill.id) }
+            guard let invocation = await self.resolveCLI() else { return }
             do {
                 try await SkillsCLI(invocation: invocation)
                     .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
@@ -254,13 +281,16 @@ final class AppState {
 
     /// Update every skill currently flagged `updateAvailable`, then a single rescan/recheck.
     func updateAll() async {
+        let targets = skills.filter { statuses[$0.id] == .updateAvailable && !updatingSkillIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        for t in targets { updatingSkillIDs.insert(t.id) }          // immediate feedback on all
         await serialize {
-            guard let invocation = await self.resolveCLI() else { return }
+            guard let invocation = await self.resolveCLI() else {
+                for t in targets { self.updatingSkillIDs.remove(t.id) }
+                return
+            }
             let cli = SkillsCLI(invocation: invocation)
-            let targets = self.skills.filter { self.statuses[$0.id] == .updateAvailable }
-            guard !targets.isEmpty else { return }
             for t in targets {
-                self.updatingSkillIDs.insert(t.id)
                 do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
                 catch { self.lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
                 self.updatingSkillIDs.remove(t.id)

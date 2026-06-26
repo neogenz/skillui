@@ -19,6 +19,9 @@ private func tempDir() throws -> URL {
     try fm.createDirectory(at: proj.appendingPathComponent(".agents/skills/foo"), withIntermediateDirectories: true)
     // A marker buried in a skip dir → must be ignored.
     try fm.createDirectory(at: home.appendingPathComponent("node_modules/.agents/skills"), withIntermediateDirectories: true)
+    // Markers inside macOS-protected folders → must NEVER be entered (privacy).
+    try fm.createDirectory(at: home.appendingPathComponent("Documents/secret/.agents/skills"), withIntermediateDirectories: true)
+    try fm.createDirectory(at: home.appendingPathComponent("Music/.agents/skills"), withIntermediateDirectories: true)
 
     // Resolve /var → /private/var so the comparison isn't tripped by the temp-dir symlink.
     let found = ProjectFinder(root: home.path, homeOverrideForTesting: home.path).find()
@@ -28,6 +31,8 @@ private func tempDir() throws -> URL {
     #expect(found.contains(projResolved))
     #expect(!found.contains(homeResolved))                     // home excluded (was the dupe bug)
     #expect(!found.contains { $0.contains("node_modules") })   // skip honored
+    #expect(!found.contains { $0.contains("/Documents") })     // protected folder never entered
+    #expect(!found.contains { $0.contains("/Music") })         // protected folder never entered
 }
 
 @Test func linkClassifierDistinguishesLocalLinkedExternal() throws {

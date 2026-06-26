@@ -17,30 +17,45 @@ struct UpdateChecker: Sendable {
     }
 
     /// Evaluate a batch. Returns skill.id → status (only for `canCheckUpdate` skills).
+    /// Groups by (repo, ref) — one tree fetch per group — and runs groups concurrently
+    /// (bounded), so hundreds of project skills resolve quickly instead of serially.
     func evaluate(_ skills: [Skill], ttl: TimeInterval = 6 * 3600, force: Bool = false) async -> [String: UpdateStatus] {
-        var out: [String: UpdateStatus] = [:]
-
-        // Group checkable skills by (repo, storedRef) → one tree fetch per group.
         var groups: [String: [Skill]] = [:]
         for s in skills where s.canCheckUpdate {
             groups["\(s.source!)\u{1}\(s.lock?.ref ?? "")", default: []].append(s)
         }
+        let groupList = Array(groups.values)
+        guard !groupList.isEmpty else { return [:] }
 
-        for (_, group) in groups {
-            let repo = group[0].source!
-            let storedRef = group[0].lock?.ref.flatMap { $0.isEmpty ? nil : $0 }
-            let tree = await treeMap(repo: repo, storedRef: storedRef, ttl: ttl, force: force)
+        var out: [String: UpdateStatus] = [:]
+        let maxConcurrent = 6
+        var next = 0
+        await withTaskGroup(of: [String: UpdateStatus].self) { tg in
+            func pump() {
+                guard next < groupList.count else { return }
+                let group = groupList[next]; next += 1
+                tg.addTask { await self.evaluateGroup(group, ttl: ttl, force: force) }
+            }
+            for _ in 0..<min(maxConcurrent, groupList.count) { pump() }
+            for await part in tg { out.merge(part) { _, new in new }; pump() }
+        }
+        return out
+    }
 
-            for s in group {
-                switch tree {
-                case .failed(let msg):
-                    out[s.id] = .failed(msg)
-                case .ok(let map, let root):
-                    guard let installed = await installedTreeSHA(for: s) else { out[s.id] = .unsupported; continue }
-                    let folder = s.repoFolder ?? ""
-                    let latest = folder.isEmpty ? root : map[folder]
-                    out[s.id] = Self.decide(installed: installed, latest: latest)
-                }
+    private func evaluateGroup(_ group: [Skill], ttl: TimeInterval, force: Bool) async -> [String: UpdateStatus] {
+        var out: [String: UpdateStatus] = [:]
+        let repo = group[0].source!
+        let storedRef = group[0].lock?.ref.flatMap { $0.isEmpty ? nil : $0 }
+        let tree = await treeMap(repo: repo, storedRef: storedRef, ttl: ttl, force: force)
+        for s in group {
+            switch tree {
+            case .failed(let msg):
+                out[s.id] = .failed(msg)
+            case .ok(let map, let root):
+                guard let installed = await installedTreeSHA(for: s) else { out[s.id] = .unsupported; continue }
+                let folder = s.repoFolder ?? ""
+                let latest = folder.isEmpty ? root : map[folder]
+                out[s.id] = Self.decide(installed: installed, latest: latest)
             }
         }
         return out

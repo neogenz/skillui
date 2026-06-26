@@ -3,6 +3,9 @@ import AppKit
 
 struct SettingsView: View {
     @Environment(AppState.self) private var app
+    @FocusState private var focus: Field?
+
+    private enum Field { case cliPath, pat }
 
     var body: some View {
         @Bindable var app = app
@@ -21,14 +24,14 @@ struct SettingsView: View {
 
             Section("skills CLI") {
                 TextField("npx / skills path", text: $app.cliPathOverride, prompt: Text("auto-detect"))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.roundedBorder).focused($focus, equals: .cliPath)
                 Text("Leave empty to resolve `skills` or `npx` from your login shell.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("GitHub") {
                 SecureField("Personal access token", text: $app.githubPAT, prompt: Text("optional"))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.roundedBorder).focused($focus, equals: .pat)
                 Text("Raises the update-check rate limit from 60 to 5000 requests/hour. Stored in your Keychain.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -69,6 +72,14 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 460, height: 540)
+        .task {
+            // When opened from the rate-limit banner, focus the token field (not the first field).
+            if app.requestPATFocus {
+                app.requestPATFocus = false
+                try? await Task.sleep(for: .milliseconds(120))   // let the default first-responder settle, then override
+                focus = .pat
+            }
+        }
     }
 
     private func addProjectFolder(_ app: AppState) {
