@@ -26,7 +26,7 @@ Menu-bar app: unified cross-agent view of skills.sh-installed skills, with updat
 - [x] **6. Panel UI** — sectioned cards, version chips, amber dots, agent chips, collapsible untracked. Verified via ImageRenderer PNG.
 - [x] **7. Actions + links** — update/update-all/skills.sh/GitHub. Verified: real update of find-skills flipped badge to up-to-date (3→2 updates).
 - [x] **8. System** — Keychain PAT, SMAppService login item (register→enabled→unregister verified), 6h background refresh (unattended scan verified), Settings form.
-- [ ] **9. States + dist** — empty/cli-missing/offline; make-dmg script. Done when: graceful everywhere; DMG scripted (notarize needs user cert).
+- [x] **9. States + dist** — empty/cli-missing/offline states; make-dmg.sh (ad-hoc + Developer-ID/notarize gated on env); README. Release build clean (0 warnings).
 
 ## Assumptions
 - Project scope requires user-added folders in Settings (CLI can't enumerate projects); **global is primary**.
