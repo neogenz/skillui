@@ -23,7 +23,12 @@ final class AppState {
         didSet { defaults.set(cliPathOverride, forKey: K.cliPath); cachedInvocation = nil }
     }
     var projectRoots: [String] {
-        didSet { defaults.set(projectRoots, forKey: K.projectRoots) }
+        didSet {
+            // Normalize + de-dup so the same folder can't yield duplicate skill rows.
+            let norm = Set(projectRoots.map { URL(fileURLWithPath: $0).standardizedFileURL.path }).sorted()
+            if norm != projectRoots { projectRoots = norm; return }
+            defaults.set(projectRoots, forKey: K.projectRoots)
+        }
     }
     var refreshIntervalHours: Double {
         didSet { defaults.set(refreshIntervalHours, forKey: K.refreshHours); startBackgroundRefresh() }
@@ -51,6 +56,16 @@ final class AppState {
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
     private var refreshTask: Task<Void, Never>?
+    /// Serial chain: refresh / updateSkill / updateAll run one at a time (never interleave
+    /// at await points), so spinners, statuses and the rate limit stay consistent.
+    private var tail: Task<Void, Never> = Task {}
+
+    private func serialize(_ op: @escaping @MainActor () async -> Void) async {
+        let prev = tail
+        let t = Task { @MainActor in await prev.value; await op() }
+        tail = t
+        await t.value
+    }
 
     /// All agent display names across discovered skills (for the Settings filter list).
     var allAgents: [String] { Array(Set(skills.flatMap(\.agents))).sorted() }
@@ -126,80 +141,66 @@ final class AppState {
         hasScannedOnce = true
     }
 
-    /// Full refresh: rescan + recheck updates (cache-guarded unless forced).
+    /// Full refresh: rescan + recheck updates (cache-guarded unless forced). Serialized.
     func refresh(force: Bool = false) async {
-        await scan()
-        await checkUpdates(force: force)
-        lastCheckedAt = Date()
+        await serialize {
+            await self.scan()
+            await self.checkUpdates(force: force)
+            self.lastCheckedAt = Date()
+        }
     }
 
     // MARK: Actions (mutating — user-initiated only)
 
     /// `skills update <name>` for one skill, then rescan + recheck so the badge clears.
     func updateSkill(_ skill: Skill) async {
-        guard let invocation = await resolveCLI() else { return }
-        updatingSkillIDs.insert(skill.id)
-        defer { updatingSkillIDs.remove(skill.id) }
-        do {
-            try await SkillsCLI(invocation: invocation)
-                .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
-            await scan()
-            await checkUpdates(force: true)
-        } catch {
-            lastError = "Update failed for \(skill.name): \(error.localizedDescription)"
+        await serialize {
+            guard let invocation = await self.resolveCLI() else { return }
+            self.updatingSkillIDs.insert(skill.id)
+            defer { self.updatingSkillIDs.remove(skill.id) }
+            do {
+                try await SkillsCLI(invocation: invocation)
+                    .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
+                await self.scan()
+                await self.checkUpdates(force: true)
+            } catch {
+                self.lastError = "Update failed for \(skill.name): \(error.localizedDescription)"
+            }
         }
     }
 
     /// Update every skill currently flagged `updateAvailable`, then a single rescan/recheck.
     func updateAll() async {
-        guard let invocation = await resolveCLI() else { return }
-        let cli = SkillsCLI(invocation: invocation)
-        let targets = skills.filter { statuses[$0.id] == .updateAvailable }
-        guard !targets.isEmpty else { return }
-        for t in targets {
-            updatingSkillIDs.insert(t.id)
-            do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
-            catch { lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
-            updatingSkillIDs.remove(t.id)
+        await serialize {
+            guard let invocation = await self.resolveCLI() else { return }
+            let cli = SkillsCLI(invocation: invocation)
+            let targets = self.skills.filter { self.statuses[$0.id] == .updateAvailable }
+            guard !targets.isEmpty else { return }
+            for t in targets {
+                self.updatingSkillIDs.insert(t.id)
+                do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
+                catch { self.lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
+                self.updatingSkillIDs.remove(t.id)
+            }
+            await self.scan()
+            await self.checkUpdates(force: true)
         }
-        await scan()
-        await checkUpdates(force: true)
     }
 
+    /// Recheck update status for all skills. Grouped per repo inside `UpdateChecker.evaluate`,
+    /// so the verdict is decided per skill against a single tree fetch per (repo, ref).
     func checkUpdates(force: Bool = false) async {
         guard !skills.isEmpty else { return }
         isCheckingUpdates = true
         defer { isCheckingUpdates = false }
 
-        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
-
-        // Untracked / computedHash-only skills can't be tree-SHA checked.
         for s in skills where !s.canCheckUpdate { statuses[s.id] = .unsupported }
-
-        // Dedup by updateKey: many skills can share one (source, ref, folder).
         let checkable = skills.filter { $0.canCheckUpdate }
         for s in checkable where statuses[s.id] != .updateAvailable { statuses[s.id] = .checking }
 
-        var byKey: [String: [Skill]] = [:]
-        for s in checkable { if let k = s.updateKey { byKey[k, default: []].append(s) } }
-
-        let keys = Array(byKey.keys)
-        let maxConcurrent = 5
-        var next = 0
-
-        await withTaskGroup(of: (String, UpdateStatus).self) { group in
-            func pump() {
-                guard next < keys.count else { return }
-                let key = keys[next]; next += 1
-                let sample = byKey[key]!.first!
-                group.addTask { (key, await checker.status(for: sample, force: force)) }
-            }
-            for _ in 0..<min(maxConcurrent, keys.count) { pump() }
-            for await (key, status) in group {
-                for s in byKey[key] ?? [] { statuses[s.id] = status }
-                pump()
-            }
-        }
+        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        let results = await checker.evaluate(checkable, force: force)
+        for (id, status) in results { statuses[id] = status }
     }
 
     private static func order(_ a: Skill, _ b: Skill) -> Bool {

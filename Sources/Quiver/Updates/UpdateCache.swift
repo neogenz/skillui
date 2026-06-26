@@ -1,15 +1,19 @@
 import Foundation
 
-/// Persisted update-check cache. Keyed by a skill's `updateKey` (source@ref::folder).
-/// The ONLY thing Quiver persists besides settings — lets badges survive relaunch and
-/// avoids re-hitting GitHub on every panel open (60 req/hr unauthenticated).
+/// Persisted update-check cache. Keyed per (repo, ref) — one entry covers EVERY skill folder
+/// in that repo (a single recursive tree fetch), plus a default-branch cache so we don't
+/// re-resolve it each run. The only thing Quiver persists besides settings; lets badges
+/// survive relaunch and keeps us well under GitHub's 60 req/hr unauthenticated ceiling.
 struct UpdateCache: Codable, Sendable {
-    var version = 1
-    var entries: [String: Entry] = [:]
+    static let currentVersion = 2
+    var version = currentVersion
+    var trees: [String: TreeEntry] = [:]      // "repo@ref" → folder SHAs
+    var branches: [String: String] = [:]      // repo → default branch
 
-    struct Entry: Codable, Sendable {
-        var latestSha: String?
+    struct TreeEntry: Codable, Sendable {
         var etag: String?
+        var folderSHAs: [String: String]
+        var rootSHA: String?
         var checkedAt: Date
     }
 }
@@ -30,19 +34,20 @@ actor UpdateCacheStore {
 
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        if let data = try? Data(contentsOf: url), let c = try? dec.decode(UpdateCache.self, from: data) {
+        if let data = try? Data(contentsOf: url),
+           let c = try? dec.decode(UpdateCache.self, from: data),
+           c.version == UpdateCache.currentVersion {
             self.cache = c
         } else {
-            self.cache = UpdateCache()
+            self.cache = UpdateCache()   // fresh (missing or older schema)
         }
     }
 
-    func get(_ key: String) -> UpdateCache.Entry? { cache.entries[key] }
+    func tree(_ key: String) -> UpdateCache.TreeEntry? { cache.trees[key] }
+    func setTree(_ key: String, _ entry: UpdateCache.TreeEntry) { cache.trees[key] = entry; save() }
 
-    func set(_ key: String, _ entry: UpdateCache.Entry) {
-        cache.entries[key] = entry
-        save()
-    }
+    func branch(_ repo: String) -> String? { cache.branches[repo] }
+    func setBranch(_ repo: String, _ branch: String) { cache.branches[repo] = branch; save() }
 
     private func save() {
         let enc = JSONEncoder()

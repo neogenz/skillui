@@ -37,14 +37,15 @@ enum DebugCLI {
             let outcome = await scanner.scan()
             print("skills: \(outcome.skills.count)  error: \(outcome.error ?? "none")\n")
 
-            let checker = withCheck ? UpdateChecker(token: nil) : nil
+            var statuses: [String: UpdateStatus] = [:]
+            if withCheck {
+                statuses = await UpdateChecker(token: nil).evaluate(outcome.skills)
+            }
             for s in outcome.skills.sorted(by: { $0.name < $1.name }) {
                 let v = s.shortVersion ?? "—"
                 let src = s.source ?? "untracked"
                 var line = "  [\(s.scope.rawValue)] \(s.name)  v:\(v)  src:\(src)  folder:\(s.repoFolder ?? "-")  agents:\(s.agents.count)"
-                if let checker, s.canCheckUpdate {
-                    line += "  → \(await checker.status(for: s))"
-                }
+                if let st = statuses[s.id] { line += "  → \(st)" }
                 print(line)
             }
             sem.signal()

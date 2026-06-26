@@ -105,6 +105,17 @@ private func writeTempLock(_ json: String) throws -> URL {
     #expect(s.shortVersion == "9f19be1")
 }
 
+@Test func rootLevelSkillIsUpdateCheckable() {
+    // A SKILL.md at the repo root → folder "" (the root tree), still checkable.
+    let lock = LockEntry(source: "owner/repo", skillPath: "SKILL.md",
+                         skillFolderHash: "abcdef0123456789")
+    let s = Skill(name: "root-skill", path: "/x", scope: .global,
+                  agents: ["Claude Code"], projectPath: nil, lock: lock)
+    #expect(s.repoFolder == "")
+    #expect(s.canCheckUpdate)
+    #expect(s.updateKey == "owner/repo@::")
+}
+
 @Test func untrackedSkillHasNoProvenance() {
     let s = Skill(name: "apex", path: "/x", scope: .global,
                   agents: ["Claude Code"], projectPath: nil, lock: nil)

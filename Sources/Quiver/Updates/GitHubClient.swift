@@ -10,6 +10,7 @@ struct GitHubClient: Sendable {
         let sha: String
     }
     struct TreeResponse: Decodable, Sendable {
+        let sha: String?           // the tree's own SHA (= the repo root folder SHA)
         let tree: [TreeEntry]?
         let truncated: Bool?
     }
@@ -48,44 +49,30 @@ struct GitHubClient: Sendable {
         return (try? JSONDecoder().decode(RepoMeta.self, from: data))?.default_branch ?? "main"
     }
 
-    struct TreeSHAResult: Sendable {
-        var sha: String?      // folder tree SHA, nil if folder not present upstream
+    struct TreeMap: Sendable {
+        var folderSHAs: [String: String]  // repo-relative folder path → tree SHA
+        var rootSHA: String?              // "" folder (repo root)
         var etag: String?
-        var notModified: Bool // 304 — caller reuses cached value
+        var notModified: Bool             // 304 — caller reuses the cached map
+        var truncated: Bool               // partial map (huge repo); missing folders → no result
     }
 
-    /// Folder tree SHA at `ref`. Uses ETag conditional requests; handles `truncated`.
-    func folderTreeSHA(repo: String, ref: String, folder: String, etag: String?) async throws -> TreeSHAResult {
+    /// One recursive tree fetch per (repo, ref) → SHAs for ALL folders at once. This is what
+    /// lets every skill from the same repo share a single request (and a single ETag), instead
+    /// of one full-tree download per skill folder. Uses ETag conditional requests.
+    func folderSHAMap(repo: String, ref: String, etag: String?) async throws -> TreeMap {
         let url = URL(string: "https://api.github.com/repos/\(repo)/git/trees/\(ref)?recursive=1")!
         let (data, resp) = try await URLSession.shared.data(for: makeRequest(url, etag: etag))
         guard let http = resp as? HTTPURLResponse else { throw GHError.noResponse }
-        if http.statusCode == 304 { return TreeSHAResult(sha: nil, etag: etag, notModified: true) }
+        if http.statusCode == 304 {
+            return TreeMap(folderSHAs: [:], rootSHA: nil, etag: etag, notModified: true, truncated: false)
+        }
         guard http.statusCode == 200 else { throw GHError.http(http.statusCode) }
         let newEtag = http.value(forHTTPHeaderField: "Etag")
         let tree = try JSONDecoder().decode(TreeResponse.self, from: data)
-
-        if tree.truncated == true {
-            let sha = try await walk(repo: repo, ref: ref, folder: folder)
-            return TreeSHAResult(sha: sha, etag: newEtag, notModified: false)
-        }
-        let entry = tree.tree?.first { $0.path == folder && $0.type == "tree" }
-        return TreeSHAResult(sha: entry?.sha, etag: newEtag, notModified: false)
-    }
-
-    /// Truncated-tree fallback: descend the path one level at a time (non-recursive trees).
-    private func walk(repo: String, ref: String, folder: String) async throws -> String? {
-        var current = ref
-        let segments = folder.split(separator: "/").map(String.init)
-        for (i, seg) in segments.enumerated() {
-            let url = URL(string: "https://api.github.com/repos/\(repo)/git/trees/\(current)")!
-            let (data, resp) = try await URLSession.shared.data(for: makeRequest(url))
-            guard let http = resp as? HTTPURLResponse else { throw GHError.noResponse }
-            guard http.statusCode == 200 else { throw GHError.http(http.statusCode) }
-            let tree = try JSONDecoder().decode(TreeResponse.self, from: data)
-            guard let entry = tree.tree?.first(where: { $0.path == seg && $0.type == "tree" }) else { return nil }
-            if i == segments.count - 1 { return entry.sha }
-            current = entry.sha
-        }
-        return nil
+        var map: [String: String] = [:]
+        for e in tree.tree ?? [] where e.type == "tree" { map[e.path] = e.sha }
+        return TreeMap(folderSHAs: map, rootSHA: tree.sha, etag: newEtag,
+                       notModified: false, truncated: tree.truncated == true)
     }
 }

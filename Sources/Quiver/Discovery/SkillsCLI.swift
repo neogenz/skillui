@@ -32,8 +32,9 @@ struct SkillsCLI: Sendable {
                                         args: baseArgs + ["list", scope.cliFlag, "--json"],
                                         cwd: cwd, dropStderr: true)
         guard r.status == 0 else { throw CLIError.nonZero(r.status, r.stderrString) }
-        let data = Self.jsonSlice(r.stdout)
-        do { return try JSONDecoder().decode([CLISkill].self, from: data) }
+        // Clean JSON is the normal case; only fall back to slicing if that fails.
+        if let skills = try? JSONDecoder().decode([CLISkill].self, from: r.stdout) { return skills }
+        do { return try JSONDecoder().decode([CLISkill].self, from: Self.jsonSlice(r.stdout)) }
         catch { throw CLIError.decode(error.localizedDescription) }
     }
 

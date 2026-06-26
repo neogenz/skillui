@@ -49,13 +49,13 @@ struct Skill: Identifiable, Sendable, Equatable {
     var isTracked: Bool { lock?.source != nil }
 
     /// True when update detection via GitHub tree SHA is possible.
-    var canCheckUpdate: Bool { lock?.source != nil && repoFolder != nil && lock?.skillFolderHash != nil }
+    var canCheckUpdate: Bool { lock?.source != nil && lock?.skillPath != nil && lock?.skillFolderHash != nil }
 
     /// Repo folder containing the skill — parent of `skillPath` (which points to SKILL.md).
+    /// Returns "" when SKILL.md is at the repo root (handled as the root tree).
     var repoFolder: String? {
         guard let p = lock?.skillPath, !p.isEmpty else { return nil }
-        let dir = (p as NSString).deletingLastPathComponent
-        return dir.isEmpty ? nil : dir
+        return (p as NSString).deletingLastPathComponent
     }
 
     /// Best available installed identifier (git tree SHA preferred, else content hash).

@@ -23,7 +23,8 @@ enum ProcessRunner {
                     args: [String],
                     cwd: String? = nil,
                     extraEnv: [String: String] = [:],
-                    dropStderr: Bool = false) async -> ProcessResult {
+                    dropStderr: Bool = false,
+                    timeoutSeconds: Double = 120) async -> ProcessResult {
         await withCheckedContinuation { (cont: CheckedContinuation<ProcessResult, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()
@@ -46,8 +47,15 @@ enum ProcessRunner {
                     cont.resume(returning: ProcessResult(status: -1, stdout: Data(), stderr: Data(msg.utf8)))
                     return
                 }
+                // Watchdog: kill a hung process (e.g. `npx` stuck on network) so the awaiting
+                // Task can never suspend forever. Captures only the pid (Sendable), not Process.
+                let pid = p.processIdentifier
+                let watchdog = DispatchWorkItem { kill(pid, SIGKILL) }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: watchdog)
+
                 let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 p.waitUntilExit()
+                watchdog.cancel()
                 cont.resume(returning: ProcessResult(status: p.terminationStatus, stdout: data, stderr: Data()))
             }
         }
