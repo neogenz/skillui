@@ -20,6 +20,7 @@ struct PanelView: View {
         }
         .frame(width: Theme.panelWidth)
         .frame(maxHeight: scrollable ? Theme.panelMaxHeight : nil)
+        .background(Theme.traySurface)
         .task { if !app.hasScannedOnce { await app.refresh() } }
     }
 
@@ -86,12 +87,12 @@ struct PanelView: View {
     }
 
     private var listBody: some View {
-        LazyVStack(spacing: 14) {
+        LazyVStack(spacing: Theme.Spacing.xl) {
             ForEach(sections) { sec in
                 SectionView(scope: sec.scope, tracked: sec.tracked, untracked: sec.untracked)
             }
         }
-        .padding(12)
+        .padding(Theme.Spacing.lg)
     }
 
     // MARK: Footer
@@ -183,11 +184,7 @@ private struct SectionView: View {
                     .padding(.horizontal, 12).padding(.vertical, 7)
                 }
             }
-            .background(Theme.cardBackground, in: RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardCorner, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 0.5)
-            )
+            .cardSurface()
         }
     }
 }

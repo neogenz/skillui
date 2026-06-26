@@ -24,10 +24,10 @@ struct StatusBadge: View {
             ProgressView().controlSize(.mini).scaleEffect(0.65).frame(width: 12, height: 12)
         case .upToDate:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 10)).foregroundStyle(.green.opacity(0.85)).help("Up to date")
+                .font(.system(size: 10)).foregroundStyle(Theme.statusOK.opacity(0.85)).help("Up to date")
         case .failed(let msg):
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 9)).foregroundStyle(.yellow).help(msg)
+                .font(.system(size: 9)).foregroundStyle(Theme.statusWarn).help(msg)
         case .unknown, .unsupported:
             EmptyView()
         }

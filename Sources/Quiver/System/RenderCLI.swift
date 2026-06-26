@@ -18,10 +18,12 @@ enum RenderCLI {
         Task { @MainActor in
             let app = AppState()
             await app.refresh()
+            let dark = CommandLine.arguments.contains("--dark")
             let view = AnyView(
-                isSettings
+                (isSettings
                     ? AnyView(SettingsView().environment(app).frame(width: 460, height: 540))
-                    : AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth))
+                    : AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth)))
+                    .environment(\.colorScheme, dark ? .dark : .light)
             )
 
             let renderer = ImageRenderer(content: view)

@@ -15,9 +15,16 @@ struct QuiverApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Quiver", systemImage: "puzzlepiece.extension.fill") {
+        MenuBarExtra {
             PanelView()
                 .environment(app)
+        } label: {
+            // Icon + a live count badge when updates are available (glanceable — the
+            // whole point of the app). Idea adapted from OpenUsage's menu-bar readout.
+            Image(systemName: "puzzlepiece.extension.fill")
+            if app.updateCount > 0 {
+                Text("\(app.updateCount)")
+            }
         }
         .menuBarExtraStyle(.window)
 

@@ -33,7 +33,7 @@ struct SkillRowView: View {
         }
         .padding(.vertical, Theme.rowVPad)
         .padding(.horizontal, Theme.rowHPad)
-        .background(hovering ? Theme.subtle.opacity(0.18) : .clear)
+        .background(hovering ? Theme.hover : .clear)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { open(skill.skillsShURL) }
