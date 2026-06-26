@@ -8,11 +8,21 @@ Cursor, and ~20 other agents — and tells you which ones have an upstream updat
 
 ## What it does
 
-- **Discovers** every CLI-installed skill, global and project scope, via the `skills` CLI.
-- **Detects updates** by comparing each skill's installed folder tree-SHA against GitHub.
+- **Discovers** every skill — global, plus across all your projects — via the `skills` CLI (the
+  menu-bar panel) and a recursive dev-folder scan (the dashboard).
+- **Detects updates** by comparing each skill's folder git tree-SHA against GitHub — global skills
+  from the lockfile, **project-local skills computed on disk** (so those are updatable too).
 - **Updates in one click** (`skills update`), with an "Update all".
+- **Dashboard window**: every skill across every project in a sortable, filterable table, each tagged
+  **Local / Linked / Global / External** so you see at a glance whether a project's skill is its own
+  copy or a symlink into the global install. Git worktrees are grouped under their main repo
+  (`repo › worktree`). Filter by project, scope, link type, or pending updates.
 - **Links out** — click a row for its skills.sh page, the glyph for its GitHub repo.
 - Lives in the menu bar (no Dock icon), launches at login, refreshes in the background.
+
+**Privacy**: the project scan only looks in dev folders (`~/workspace`, `~/Developer`, `~/code`, …) and
+**never touches Documents, Desktop, Downloads, Music, Pictures**, or other protected folders — so it
+won't set off macOS privacy prompts. Point it at a custom root in Settings if your code lives elsewhere.
 
 No account, no database, no third-party dependencies. The only thing it persists is a
 small JSON update-cache (so badges survive relaunch and GitHub isn't hammered).
@@ -33,8 +43,10 @@ open dist/Quiver.app
 Dev verification hooks (headless, no GUI):
 
 ```bash
-.build/debug/Quiver --scan-dump --check     # print discovered skills + update status
-.build/debug/Quiver --render-png panel.png  # rasterize the panel to a PNG
+.build/debug/Quiver --scan-dump --check          # global+manual discovery + update status
+.build/debug/Quiver --scan-projects [root] --check   # recursive multi-project scan + status
+.build/debug/Quiver --render-png panel.png       # rasterize the panel to a PNG
+.build/debug/Quiver --dashboard                  # launch with the dashboard window open
 ```
 
 ## Package a DMG

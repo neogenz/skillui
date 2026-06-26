@@ -2,6 +2,9 @@
 
 macOS menu-bar app: one unified, cross-agent view of installed [skills.sh](https://skills.sh)
 skills (Claude Code / Codex / Cursor / ~25 agents) with upstream update detection and one-click update.
+Two surfaces: a glanceable **menu-bar panel** (global + watched projects) and a full **dashboard
+window** that recursively scans dev folders for every project's skills, classifying each as
+project-local vs symlinked-into-global and grouping git worktrees under their main repo.
 Swift 6 + SwiftUI, SwiftPM (no `.xcodeproj`), **system frameworks only — no third-party deps**.
 
 ## Build / run / test
@@ -20,9 +23,11 @@ bare `.build/.../Quiver` binary works only for the headless hooks below.
 ## Headless dev hooks (verify without the GUI)
 
 ```bash
-.build/debug/Quiver --scan-dump [--check]      # print discovered skills (+ update status)
-.build/debug/Quiver --render-png <path> [--dark]   # rasterize the panel to PNG (ImageRenderer)
-.build/debug/Quiver --render-settings <path>       # rasterize Settings
+.build/debug/Quiver --scan-dump [--check]          # global+manual discovery (+ update status)
+.build/debug/Quiver --scan-projects [root] [--check]   # recursive multi-project scan (+ status)
+.build/debug/Quiver --tree-sha <folder>            # local git tree SHA of a folder
+.build/debug/Quiver --render-png|--render-dashboard|--render-settings <path> [--dark]
+.build/debug/Quiver --dashboard                    # launch with the dashboard window open
 .build/debug/Quiver --login-status|--login-register|--login-unregister   # test SMAppService (from the bundle)
 ```
 
@@ -30,12 +35,34 @@ These exit before the GUI starts (see `System/DebugCLI.swift`, `System/RenderCLI
 
 ## Architecture
 
-`Discovery/` shells out (`skills list`) + reads lockfiles → `[Skill]`. `Updates/` compares folder
-tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`) coordinates everything.
-`UI/` is the panel. `App/QuiverApp.swift` is the `@main` MenuBarExtra entry.
+`Discovery/` builds `[Skill]` two ways:
+- **Panel** path = CLI-driven: `SkillsCLI` runs `skills list` (global + watched project roots) joined
+  to lockfiles. The `skills` CLI owns the agent↔dir mapping — don't reinvent it here.
+- **Dashboard** path = filesystem-driven: `ProjectFinder` recursively finds project dirs under the
+  scan root; `FilesystemScanner` enumerates each project's skill dirs; `LinkClassifier` stats them
+  for symlink info the CLI doesn't expose; `GitInfo` detects git worktrees.
 
-- Discovery is **CLI-driven**, never dir-scanning — the `skills` CLI owns the agent↔dir mapping.
-- The only persisted state besides UserDefaults/Keychain is `~/Library/Application Support/Quiver/update-cache.json`.
+`Updates/` compares folder tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`)
+coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `DashboardView` (window).
+`App/QuiverApp.swift` = `@main` with MenuBarExtra + Settings + Dashboard `Window` scenes.
+
+- The only persisted state besides UserDefaults/Keychain is
+  `~/Library/Application Support/Quiver/update-cache.json` (per-repo tree SHAs/ETags + local-tree cache).
+
+## Dashboard: multi-project scan, link types, worktrees
+
+- **Link type** (`LinkType`, classified by `LinkClassifier`): `global` (the canonical install),
+  `linkedGlobal` (a project symlink INTO `~/.agents/skills` — shown with a link icon), `projectLocal`
+  (a real dir owned by the project), `linkedExternal` (symlink elsewhere). This is the headline
+  cross-project signal.
+- **Worktrees**: `GitInfo` reads `.git` — a *file* (`gitdir: …/.git/worktrees/<name>`) means a worktree;
+  shown as `mainRepo › worktree` and grouped/filterable under the main repo.
+- **Update status per kind**: global → stored `skillFolderHash`; project-local → local git tree SHA
+  (`GitTreeHasher`) vs upstream; linked-global → mapped to its global counterpart; external/untracked → none.
+- **Privacy (critical)**: the recursive scan defaults to dev roots (`AppState.defaultDevRoots()`:
+  `~/workspace`, `~/Developer`, `~/code`, …), NOT the whole home, and `ProjectFinder.skip` hard-excludes
+  macOS TCC-protected/personal dirs (Documents, Desktop, Downloads, Music, Pictures, Movies, Library) so
+  the app never lists their contents → no privacy prompts. Never widen this without reason.
 
 ## Verified data layer (do NOT re-derive — confirmed against `skills` CLI v1.5.13)
 
@@ -76,5 +103,9 @@ tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`) coo
   — a render looking right does NOT prove the live panel; verify on-device too.
 - `SMAppService` login-item registration only works from the **bundle**, not `swift run`.
 - Unauthenticated GitHub = 60 req/hr. Update checks are grouped **per repo** (one tree fetch covers
-  all its skill folders) + ETag + 6h TTL; keep it that way.
+  all its skill folders) + ETag + 6h TTL; keep it that way. Many project repos still blow 60/hr → a
+  PAT (5000/hr) is needed; rate-limit (403) is surfaced as a dashboard banner (`AppState.isRateLimited`)
+  with an "Add token" button that opens Settings focused on the PAT field.
+- First multi-project scan reads every project-local folder to hash it (then cached by a metadata
+  signature). Runs in the background — globals/panel show first; `.checking` shows while it computes.
 - The app works fully offline except update badges (only GitHub must be reachable).
