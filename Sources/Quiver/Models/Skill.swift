@@ -12,13 +12,13 @@ import Foundation
 ///   - Neither stores `ref` reliably → resolve the repo default branch at check time.
 ///   - `skillPath` points at the SKILL.md file, so the repo *folder* is its parent dir.
 struct LockEntry: Sendable, Equatable {
-    var source: String?          // "owner/repo"
-    var sourceURL: String?       // e.g. "https://github.com/owner/repo.git"
-    var ref: String?             // usually absent
-    var skillPath: String?       // path to SKILL.md within the repo
-    var skillFolderHash: String? // git tree SHA (v3 global) — updatable
-    var computedHash: String?    // sha256 of contents (v1 project)
-    var pluginName: String?
+    var source: String? = nil          // "owner/repo"
+    var sourceURL: String? = nil       // e.g. "https://github.com/owner/repo.git"
+    var ref: String? = nil             // usually absent
+    var skillPath: String? = nil       // path to SKILL.md within the repo
+    var skillFolderHash: String? = nil // git tree SHA (v3 global) — updatable
+    var computedHash: String? = nil    // sha256 of contents (v1 project)
+    var pluginName: String? = nil
 }
 
 /// Update state for a skill, surfaced as a badge in the UI.

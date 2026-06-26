@@ -7,6 +7,7 @@ struct PanelView: View {
     /// When false, the list is laid out without a ScrollView (used by the PNG renderer,
     /// since ImageRenderer can't rasterize ScrollView content).
     var scrollable = true
+    @State private var contentHeight: CGFloat = 0
 
     private var busy: Bool { app.isScanning || app.isCheckingUpdates }
 
@@ -19,7 +20,6 @@ struct PanelView: View {
             footer
         }
         .frame(width: Theme.panelWidth)
-        .frame(maxHeight: scrollable ? Theme.panelMaxHeight : nil)
         .background(Theme.traySurface)
         .task { if !app.hasScannedOnce { await app.refresh() } }
     }
@@ -80,14 +80,23 @@ struct PanelView: View {
                          title: "No skills installed",
                          subtitle: "Add one with  npx skills add <owner/repo>")
         } else if scrollable {
-            ScrollView { listBody }
+            // A ScrollView has no intrinsic height, so in a self-sizing MenuBarExtra(.window)
+            // it collapses to zero. Measure the content and size the scroll area to it, capped.
+            ScrollView {
+                listBody
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: ContentHeightKey.self, value: g.size.height)
+                    })
+            }
+            .frame(height: min(max(contentHeight, 60), Theme.panelMaxHeight))
+            .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
         } else {
             listBody
         }
     }
 
     private var listBody: some View {
-        LazyVStack(spacing: Theme.Spacing.xl) {
+        VStack(spacing: Theme.Spacing.xl) {
             ForEach(sections) { sec in
                 SectionView(scope: sec.scope, tracked: sec.tracked, untracked: sec.untracked)
             }
@@ -145,6 +154,12 @@ struct PanelView: View {
         default: return 3
         }
     }
+}
+
+/// Measures the scroll content's height so the panel can size to it (up to a cap).
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// One scope group: a titled card with tracked rows + a collapsible "Untracked" list.

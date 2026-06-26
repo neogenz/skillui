@@ -48,7 +48,7 @@ struct SkillsCLI: Sendable {
     }
 
     /// Tolerate stray bytes around the JSON (e.g. a one-time npx install notice).
-    private static func jsonSlice(_ data: Data) -> Data {
+    static func jsonSlice(_ data: Data) -> Data {
         guard let start = data.firstIndex(of: UInt8(ascii: "[")),
               let end = data.lastIndex(of: UInt8(ascii: "]")), end >= start else { return data }
         return data.subdata(in: start..<(end + 1))

@@ -15,6 +15,14 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
+        ),
+        .testTarget(
+            name: "QuiverTests",
+            dependencies: ["Quiver"],
+            path: "Tests/QuiverTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
         )
     ]
 )

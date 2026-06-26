@@ -9,6 +9,12 @@ struct UpdateChecker: Sendable {
 
     private var gh: GitHubClient { GitHubClient(token: token) }
 
+    /// Pure decision: compare installed folder tree SHA against the latest upstream one.
+    static func decide(installed: String, latest: String?) -> UpdateStatus {
+        guard let latest else { return .failed("skill folder not found upstream") }
+        return latest == installed ? .upToDate : .updateAvailable
+    }
+
     func status(for skill: Skill, ttl: TimeInterval = 6 * 3600, force: Bool = false) async -> UpdateStatus {
         guard skill.canCheckUpdate,
               let repo = skill.source,
@@ -34,11 +40,10 @@ struct UpdateChecker: Sendable {
 
             if res.notModified, let latest = await cache?.get(key)?.latestSha {
                 await cache?.set(key, .init(latestSha: latest, etag: res.etag, checkedAt: Date()))
-                return latest == installed ? .upToDate : .updateAvailable
+                return Self.decide(installed: installed, latest: latest)
             }
-            guard let latest = res.sha else { return .failed("skill folder not found upstream") }
-            await cache?.set(key, .init(latestSha: latest, etag: res.etag, checkedAt: Date()))
-            return latest == installed ? .upToDate : .updateAvailable
+            await cache?.set(key, .init(latestSha: res.sha, etag: res.etag, checkedAt: Date()))
+            return Self.decide(installed: installed, latest: res.sha)
         } catch {
             return .failed(error.localizedDescription)
         }
