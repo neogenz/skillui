@@ -6,6 +6,8 @@ struct QuiverApp: App {
     @State private var app = AppState()
 
     init() {
+        // Dev verification hook: `Quiver --scan-dump [--check]` runs headless and exits.
+        DebugCLI.runIfRequested()
         // Menu-bar-only. Belt-and-suspenders with Info.plist LSUIElement=YES so the
         // app also stays out of the Dock when launched as a bare binary during dev.
         NSApplication.shared.setActivationPolicy(.accessory)

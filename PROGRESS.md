@@ -21,8 +21,8 @@ Menu-bar app: unified cross-agent view of skills.sh-installed skills, with updat
 
 - [x] **0. Analyze** — verified both VERIFY items + corrected ~6 spec assumptions; proved update algorithm end-to-end.
 - [ ] **1-2. Scaffold + menu-bar shell** — SPM executable, .app bundle (LSUIElement), MenuBarExtra(.window), AppState. Done when: launches, no Dock icon, panel opens.
-- [ ] **3-4. Discovery** — ShellEnvironment, SkillsCLI, LockfileParser (both schemas), SkillScanner. Done when: real skills load with source/sha.
-- [ ] **5. Update detection** — GitHubClient + UpdateChecker + UpdateCache (ETag, 6h). Done when: badges correct.
+- [x] **3-4. Discovery** — ShellEnvironment, SkillsCLI, LockfileParser (both schemas), SkillScanner. Verified: `--scan-dump` loads 40 real skills, tracked ones carry source/folder/SHA, untracked skipped.
+- [x] **5. Update detection** — GitHubClient + UpdateChecker + UpdateCache (ETag, 6h). Verified: find-skills/angular-developer/modern-web-guidance→updateAvailable, slidev→upToDate via real tree-SHA. Headless via `--scan-dump --check`.
 - [ ] **6. Panel UI** — rows + agent chips + scope sections + header counts. Done when: layout + badges right.
 - [ ] **7. Actions + links** — update / update-all / skills.sh / GitHub. Done when: update clears badge, links open.
 - [ ] **8. System** — SMAppService login item, background refresh, Settings (PAT/path/interval/projects). Done when: relaunches at login, refreshes unattended.
