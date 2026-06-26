@@ -128,7 +128,7 @@ struct PanelView: View {
 
     private var sections: [PanelSection] {
         Scope.allCases.compactMap { scope in
-            let inScope = app.skills.filter { $0.scope == scope }
+            let inScope = app.visibleSkills.filter { $0.scope == scope }
             guard !inScope.isEmpty else { return nil }
             let tracked = inScope.filter { $0.isTracked }.sorted { rank($0) < rank($1) }
             let untracked = inScope.filter { !$0.isTracked }

@@ -25,21 +25,68 @@ final class AppState {
     var projectRoots: [String] {
         didSet { defaults.set(projectRoots, forKey: K.projectRoots) }
     }
+    var refreshIntervalHours: Double {
+        didSet { defaults.set(refreshIntervalHours, forKey: K.refreshHours); startBackgroundRefresh() }
+    }
+    var hiddenAgents: Set<String> {
+        didSet { defaults.set(Array(hiddenAgents), forKey: K.hiddenAgents) }
+    }
+    /// GitHub PAT — stored in the Keychain, never UserDefaults.
+    var githubPAT: String {
+        didSet { Keychain.setToken(githubPAT.isEmpty ? nil : githubPAT) }
+    }
+    /// Launch-at-login, reflected straight from SMAppService.
+    var launchAtLogin: Bool {
+        get { LoginItem.isEnabled }
+        set { try? LoginItem.setEnabled(newValue) }
+    }
 
     private let defaults = UserDefaults.standard
     private enum K {
         static let cliPath = "cliPathOverride"
         static let projectRoots = "projectRoots"
+        static let refreshHours = "refreshIntervalHours"
+        static let hiddenAgents = "hiddenAgents"
     }
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
+    private var refreshTask: Task<Void, Never>?
 
-    /// GitHub PAT for higher rate limits. Group F wires this to the Keychain; nil = unauthenticated.
-    private func githubToken() -> String? { nil }
+    /// All agent display names across discovered skills (for the Settings filter list).
+    var allAgents: [String] { Array(Set(skills.flatMap(\.agents))).sorted() }
+
+    /// Skills after per-agent visibility (hide skills whose agents are ALL hidden).
+    var visibleSkills: [Skill] {
+        guard !hiddenAgents.isEmpty else { return skills }
+        return skills.filter { !$0.agents.allSatisfy(hiddenAgents.contains) }
+    }
+
+    private func githubToken() -> String? { Keychain.token() }
+
+    /// Periodic unattended refresh. Restarted when the interval changes.
+    func startBackgroundRefresh() {
+        refreshTask?.cancel()
+        let hours = refreshIntervalHours
+        refreshTask = Task { [weak self] in
+            await self?.refresh()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(max(0.25, hours) * 3600))
+                if Task.isCancelled { break }
+                await self?.refresh()
+            }
+        }
+    }
 
     init() {
         cliPathOverride = defaults.string(forKey: K.cliPath) ?? ""
         projectRoots = defaults.stringArray(forKey: K.projectRoots) ?? []
+        refreshIntervalHours = defaults.object(forKey: K.refreshHours) as? Double ?? 6
+        hiddenAgents = Set(defaults.stringArray(forKey: K.hiddenAgents) ?? [])
+        githubPAT = Keychain.token() ?? ""
+        // Don't auto-refresh in the headless dev hooks (they drive their own scan + exit).
+        let headless = CommandLine.arguments.contains("--scan-dump")
+            || CommandLine.arguments.contains("--render-png")
+        if !headless { startBackgroundRefresh() }
     }
 
     var updateCount: Int {

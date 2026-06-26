@@ -6,9 +6,11 @@ import AppKit
 /// Pumps the main run loop while the async scan completes (can't block main here).
 enum RenderCLI {
     static func runIfRequested() {
-        guard let idx = CommandLine.arguments.firstIndex(of: "--render-png"),
-              idx + 1 < CommandLine.arguments.count else { return }
-        let outPath = CommandLine.arguments[idx + 1]
+        let args = CommandLine.arguments
+        let isSettings = args.contains("--render-settings")
+        let flagName = isSettings ? "--render-settings" : "--render-png"
+        guard let idx = args.firstIndex(of: flagName), idx + 1 < args.count else { return }
+        let outPath = args[idx + 1]
 
         final class Flag: @unchecked Sendable { var done = false }
         let flag = Flag()
@@ -16,9 +18,11 @@ enum RenderCLI {
         Task { @MainActor in
             let app = AppState()
             await app.refresh()
-            let view = PanelView(scrollable: false)
-                .environment(app)
-                .frame(width: Theme.panelWidth)
+            let view = AnyView(
+                isSettings
+                    ? AnyView(SettingsView().environment(app).frame(width: 460, height: 540))
+                    : AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth))
+            )
 
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2
