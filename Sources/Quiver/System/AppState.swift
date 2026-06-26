@@ -17,6 +17,12 @@ final class AppState {
     var updatingSkillIDs: Set<String> = []
     var lastCheckedAt: Date?
 
+    // Recursive multi-project scan (Dashboard)
+    var projectScanSkills: [Skill] = []
+    var discoveredProjects: [String] = []
+    var isScanningProjects = false
+    var lastProjectScanAt: Date?
+
     // MARK: Settings (persisted to UserDefaults)
 
     var cliPathOverride: String {
@@ -36,6 +42,18 @@ final class AppState {
     var hiddenAgents: Set<String> {
         didSet { defaults.set(Array(hiddenAgents), forKey: K.hiddenAgents) }
     }
+    /// Root scanned recursively for projects (default: home).
+    var scanRoot: String {
+        didSet { defaults.set(scanRoot, forKey: K.scanRoot) }
+    }
+    /// Reference global-skills root for link classification (default: ~/.agents/skills).
+    var globalSkillsRootOverride: String {
+        didSet { defaults.set(globalSkillsRootOverride, forKey: K.globalRoot) }
+    }
+    /// Scan projects automatically on launch + each refresh.
+    var autoScanProjects: Bool {
+        didSet { defaults.set(autoScanProjects, forKey: K.autoScan) }
+    }
     /// GitHub PAT — stored in the Keychain, never UserDefaults.
     var githubPAT: String {
         didSet { Keychain.setToken(githubPAT.isEmpty ? nil : githubPAT) }
@@ -52,6 +70,9 @@ final class AppState {
         static let projectRoots = "projectRoots"
         static let refreshHours = "refreshIntervalHours"
         static let hiddenAgents = "hiddenAgents"
+        static let scanRoot = "scanRoot"
+        static let globalRoot = "globalSkillsRootOverride"
+        static let autoScan = "autoScanProjects"
     }
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
@@ -97,6 +118,9 @@ final class AppState {
         projectRoots = defaults.stringArray(forKey: K.projectRoots) ?? []
         refreshIntervalHours = defaults.object(forKey: K.refreshHours) as? Double ?? 6
         hiddenAgents = Set(defaults.stringArray(forKey: K.hiddenAgents) ?? [])
+        scanRoot = defaults.string(forKey: K.scanRoot) ?? ""
+        globalSkillsRootOverride = defaults.string(forKey: K.globalRoot) ?? ""
+        autoScanProjects = defaults.object(forKey: K.autoScan) as? Bool ?? true
         githubPAT = Keychain.token() ?? ""
         // Don't auto-refresh in the headless dev hooks (they drive their own scan + exit).
         let headless = CommandLine.arguments.contains("--scan-dump")
@@ -130,7 +154,10 @@ final class AppState {
         }
         cliMissing = false
 
-        let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation), projectRoots: projectRoots)
+        let globalRoots = LinkClassifier.defaultGlobalRoots(
+            customGlobalRoot: globalSkillsRootOverride.isEmpty ? nil : globalSkillsRootOverride)
+        let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation),
+                                   projectRoots: projectRoots, globalRoots: globalRoots)
         let outcome = await scanner.scan()
         skills = outcome.skills.sorted(by: Self.order)
         lastError = outcome.error
@@ -146,8 +173,49 @@ final class AppState {
         await serialize {
             await self.scan()
             await self.checkUpdates(force: force)
+            if self.autoScanProjects { await self.runProjectScan() }
             self.lastCheckedAt = Date()
         }
+    }
+
+    // MARK: Multi-project scan (Dashboard)
+
+    /// Manually rescan all projects under the configured root. Serialized.
+    func rescanProjects() async {
+        await serialize { await self.runProjectScan() }
+    }
+
+    private func runProjectScan() async {
+        isScanningProjects = true
+        defer { isScanningProjects = false }
+        let rootPath = scanRoot.isEmpty
+            ? FileManager.default.homeDirectoryForCurrentUser.path
+            : (scanRoot as NSString).expandingTildeInPath
+        let globalRoots = LinkClassifier.defaultGlobalRoots(
+            customGlobalRoot: globalSkillsRootOverride.isEmpty ? nil : globalSkillsRootOverride)
+        let finder = ProjectFinder(root: rootPath)
+        let scanner = FilesystemScanner(globalRoots: globalRoots)
+        // FS walk + enumeration are synchronous — run off the main actor.
+        let projects = await Task.detached(priority: .utility) { finder.find() }.value
+        let found = await Task.detached(priority: .utility) { scanner.scan(projectRoots: projects) }.value
+        discoveredProjects = projects
+        projectScanSkills = found.sorted(by: Self.order)
+        lastProjectScanAt = Date()
+    }
+
+    /// All skills for the dashboard: global (CLI-accurate) + recursively-scanned project skills.
+    var dashboardSkills: [Skill] {
+        skills.filter { $0.scope == .global } + projectScanSkills
+    }
+
+    /// Update status, mapping a project's linked-global skill to its global counterpart.
+    func effectiveStatus(for s: Skill) -> UpdateStatus {
+        if let st = statuses[s.id] { return st }
+        if s.linkType == .linkedGlobal,
+           let g = skills.first(where: { $0.scope == .global && $0.name == s.name }) {
+            return statuses[g.id] ?? .unsupported
+        }
+        return .unsupported
     }
 
     // MARK: Actions (mutating — user-initiated only)

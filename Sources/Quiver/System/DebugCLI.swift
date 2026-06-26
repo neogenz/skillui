@@ -23,6 +23,27 @@ enum DebugCLI {
             exit(0)
         }
 
+        // Recursive multi-project scan probe: `--scan-projects [root]`.
+        if let i = args.firstIndex(of: "--scan-projects") {
+            let root = (i + 1 < args.count && !args[i + 1].hasPrefix("--"))
+                ? args[i + 1] : FileManager.default.homeDirectoryForCurrentUser.path
+            let sem = DispatchSemaphore(value: 0)
+            Task.detached {
+                let globalRoots = LinkClassifier.defaultGlobalRoots(customGlobalRoot: nil)
+                let projects = ProjectFinder(root: root).find()
+                print("root: \(root)\nprojects found: \(projects.count)")
+                for p in projects { print("  • \(p)") }
+                let skills = FilesystemScanner(globalRoots: globalRoots).scan(projectRoots: projects)
+                print("project skills: \(skills.count)")
+                for s in skills.sorted(by: { $0.name < $1.name }) {
+                    print("  [\(s.linkType.rawValue)] \(s.name)  src:\(s.source ?? "—")  proj:\(s.projectName ?? "-")  agents:\(s.agents.joined(separator: ","))")
+                }
+                sem.signal()
+            }
+            sem.wait()
+            exit(0)
+        }
+
         guard args.contains("--scan-dump") else { return }
         let withCheck = args.contains("--check")
 

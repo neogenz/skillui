@@ -6,6 +6,7 @@ import Foundation
 struct SkillScanner: Sendable {
     let cli: SkillsCLI
     let projectRoots: [String]
+    var globalRoots: [String] = []   // for link-type classification of project skills
 
     struct Outcome: Sendable {
         var skills: [Skill]
@@ -32,8 +33,10 @@ struct SkillScanner: Sendable {
             let projLock = LockfileParser.read(LockfileParser.projectLockURL(projectRoot: root))
             do {
                 for c in try await cli.list(scope: .project, cwd: root) {
+                    let link = LinkClassifier.classify(path: c.path, scope: .project, globalRoots: globalRoots)
                     result.append(Skill(name: c.name, path: c.path, scope: .project,
-                                        agents: c.agents, projectPath: root, lock: projLock[c.name]))
+                                        agents: c.agents, projectPath: root, lock: projLock[c.name],
+                                        linkType: link))
                 }
             } catch {
                 if firstError == nil {

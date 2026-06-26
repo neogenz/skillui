@@ -40,8 +40,12 @@ struct Skill: Identifiable, Sendable, Equatable {
     let agents: [String]        // display names, e.g. ["Claude Code","Cursor",…]
     let projectPath: String?    // project root for project-scope skills; nil for global
     var lock: LockEntry?
+    var linkType: LinkType = .global   // set by the scanners (global / linked / project-local)
 
     var id: String { "\(scope.rawValue)|\(projectPath ?? "~")|\(name)|\(path)" }
+
+    /// Short project label for the dashboard (last path component of the project root).
+    var projectName: String? { projectPath.map { ($0 as NSString).lastPathComponent } }
 
     var source: String? { lock?.source }
 
