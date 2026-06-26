@@ -28,6 +28,22 @@ Menu-bar app: unified cross-agent view of skills.sh-installed skills, with updat
 - [x] **8. System** — Keychain PAT, SMAppService login item (register→enabled→unregister verified), 6h background refresh (unattended scan verified), Settings form.
 - [x] **9. States + dist** — empty/cli-missing/offline states; make-dmg.sh (ad-hoc + Developer-ID/notarize gated on env); README. Release build clean (0 warnings).
 
+## Post-build (review + polish + verification)
+
+- [x] **Visual rework** — OpenUsage / System-Settings grouped aesthetic (opaque tray + borderless
+  `.fill.quaternary` cards, radius 12, light/dark parity) + menu-bar update-count badge + design
+  tokens (port-killer-inspired). Both refs cloned + studied.
+- [x] **Unit tests** — `Tests/QuiverTests` (Swift Testing, 12 green): path resolution, both lock
+  schemas + malformed tolerance, Skill derivations, root-level skill, SHA-compare decision, GitHub
+  tree parsing, CLI JSON noise tolerance.
+- [x] **Adversarial review (-x)** — 2 parallel reviewers (concurrency + data-layer). Resolved:
+  per-repo grouped checks + per-skill verdict, root-level skills checkable, serial task chain,
+  Process watchdog timeout, projectRoots dedup, jsonSlice hardening. (XDG path = false positive.)
+- [x] **Live on-device verification** — launches (UIElement, no Dock), menu-bar "2" badge, panel
+  opens via System Events with full grouped list, real update cleared a badge (3→2), background
+  refresh unattended, login-item lifecycle. Captured via screencapture.
+- [x] **CLAUDE.md** — written per claude-code-guide best practices.
+
 ## Assumptions
 - Project scope requires user-added folders in Settings (CLI can't enumerate projects); **global is primary**.
 - PAT stored in Keychain.
