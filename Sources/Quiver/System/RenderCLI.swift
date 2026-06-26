@@ -1,30 +1,44 @@
 import SwiftUI
 import AppKit
 
-/// Dev-only visual verification: `Quiver --render-png <path>` scans, then rasterizes the
-/// real panel (with live data) to a PNG via ImageRenderer — no menu-bar click needed.
+/// Dev-only visual verification: rasterize a surface to PNG with live data — no GUI needed.
+///   --render-png <path>        the menu-bar panel
+///   --render-settings <path>   the Settings form
+///   --render-dashboard <path>  the dashboard window
+/// Add --dark for dark mode. QUIVER_SCAN_ROOT narrows the dashboard project scan.
 /// Pumps the main run loop while the async scan completes (can't block main here).
 enum RenderCLI {
     static func runIfRequested() {
         let args = CommandLine.arguments
-        let isSettings = args.contains("--render-settings")
-        let flagName = isSettings ? "--render-settings" : "--render-png"
-        guard let idx = args.firstIndex(of: flagName), idx + 1 < args.count else { return }
-        let outPath = args[idx + 1]
+        let flags: [(flag: String, target: String)] = [
+            ("--render-png", "panel"), ("--render-settings", "settings"), ("--render-dashboard", "dashboard"),
+        ]
+        var target: String?
+        var outPath: String?
+        for f in flags {
+            if let i = args.firstIndex(of: f.flag), i + 1 < args.count { target = f.target; outPath = args[i + 1]; break }
+        }
+        guard let target, let outPath else { return }
+        let dark = args.contains("--dark")
 
         final class Flag: @unchecked Sendable { var done = false }
         let flag = Flag()
 
         Task { @MainActor in
             let app = AppState()
+            if let root = ProcessInfo.processInfo.environment["QUIVER_SCAN_ROOT"] { app.scanRoot = root }
             await app.refresh()
-            let dark = CommandLine.arguments.contains("--dark")
-            let view = AnyView(
-                (isSettings
-                    ? AnyView(SettingsView().environment(app).frame(width: 460, height: 540))
-                    : AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth)))
-                    .environment(\.colorScheme, dark ? .dark : .light)
-            )
+
+            let content: AnyView
+            switch target {
+            case "settings":
+                content = AnyView(SettingsView().environment(app).frame(width: 460, height: 540))
+            case "dashboard":
+                content = AnyView(DashboardView().environment(app).frame(width: 980, height: 560))
+            default:
+                content = AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth))
+            }
+            let view = content.environment(\.colorScheme, dark ? .dark : .light)
 
             let renderer = ImageRenderer(content: view)
             renderer.scale = 2

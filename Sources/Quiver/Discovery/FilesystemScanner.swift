@@ -21,6 +21,7 @@ struct FilesystemScanner: Sendable {
     func scanProject(_ root: String) -> [Skill] {
         let fm = FileManager.default
         let lock = LockfileParser.read(LockfileParser.projectLockURL(projectRoot: root))
+        let meta = GitInfo.meta(for: root)
 
         struct Acc { var canonicalPath: String; var agents: Set<String> }
         var byName: [String: Acc] = [:]
@@ -46,7 +47,8 @@ struct FilesystemScanner: Sendable {
             let link = LinkClassifier.classify(path: acc.canonicalPath, scope: .project, globalRoots: globalRoots)
             return Skill(name: name, path: acc.canonicalPath, scope: .project,
                          agents: Array(acc.agents).sorted(), projectPath: root,
-                         lock: lock[name], linkType: link)
+                         lock: lock[name], linkType: link,
+                         projectGroup: meta.mainRepo ?? meta.name, isWorktree: meta.isWorktree)
         }
         .sorted { $0.name < $1.name }
     }

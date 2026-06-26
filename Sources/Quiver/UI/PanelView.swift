@@ -4,6 +4,7 @@ import AppKit
 struct PanelView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     /// When false, the list is laid out without a ScrollView (used by the PNG renderer,
     /// since ImageRenderer can't rasterize ScrollView content).
     var scrollable = true
@@ -117,6 +118,10 @@ struct PanelView: View {
                     .font(.system(size: 9)).foregroundStyle(.yellow).help(err)
             }
             Spacer()
+            IconButton(systemName: "macwindow", help: "Open dashboard") {
+                openWindow(id: "dashboard")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             IconButton(systemName: "gearshape", help: "Settings") { openSettings() }
             IconButton(systemName: "power", help: "Quit Quiver") { NSApplication.shared.terminate(nil) }
         }

@@ -7,13 +7,19 @@ import Foundation
 struct ProjectFinder: Sendable {
     var root: String
     var maxDepth: Int = 6
+    var homeOverrideForTesting: String? = nil
 
     static let skip: Set<String> = [
         "node_modules", ".git", ".svn", ".hg", "Library", "Applications", ".build", "build",
         "DerivedData", "Pods", "dist", "out", ".next", ".nuxt", ".cache", ".venv", "venv",
         "__pycache__", ".gradle", ".npm", ".cargo", "vendor", ".Trash", "target", ".terraform",
+        // Global agent config dirs — the global skills live here but they are NOT projects.
+        ".claude", ".codex", ".cursor", ".agents", ".config", ".vibe", ".hermes",
+        ".deepagents", ".gemini", ".local",
     ]
     static let markers = [".agents/skills", ".claude/skills", ".codex/skills", ".cursor/skills"]
+
+    private var homePath: String { homeOverrideForTesting ?? FileManager.default.homeDirectoryForCurrentUser.path }
 
     func find() -> [String] {
         let start = URL(fileURLWithPath: (root as NSString).expandingTildeInPath)
@@ -23,6 +29,8 @@ struct ProjectFinder: Sendable {
     }
 
     private func isProject(_ dir: URL) -> Bool {
+        // Home holds the GLOBAL skill dirs (~/.claude/skills, ~/.agents/skills, …); it is not a project.
+        if dir.path == homePath { return false }
         let fm = FileManager.default
         if fm.fileExists(atPath: dir.appendingPathComponent("skills-lock.json").path) { return true }
         return Self.markers.contains { fm.fileExists(atPath: dir.appendingPathComponent($0).path) }

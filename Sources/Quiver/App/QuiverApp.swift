@@ -19,18 +19,38 @@ struct QuiverApp: App {
             PanelView()
                 .environment(app)
         } label: {
-            // Icon + a live count badge when updates are available (glanceable — the
-            // whole point of the app). Idea adapted from OpenUsage's menu-bar readout.
-            Image(systemName: "puzzlepiece.extension.fill")
-            if app.updateCount > 0 {
-                Text("\(app.updateCount)")
-            }
+            MenuBarLabel(count: app.updateCount)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
                 .environment(app)
+        }
+
+        Window("Quiver Dashboard", id: "dashboard") {
+            DashboardView()
+                .environment(app)
+        }
+        .defaultSize(width: 980, height: 580)
+    }
+}
+
+/// Menu-bar label: icon + live update-count badge. Also the launch point for the
+/// `--dashboard` dev flag (opens the dashboard window on first appearance).
+private struct MenuBarLabel: View {
+    let count: Int
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: "puzzlepiece.extension.fill")
+        if count > 0 { Text("\(count)") }
+        Color.clear.frame(width: 0, height: 0).onAppear {
+            if CommandLine.arguments.contains("--dashboard") {
+                NSApplication.shared.setActivationPolicy(.regular)
+                openWindow(id: "dashboard")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
         }
     }
 }

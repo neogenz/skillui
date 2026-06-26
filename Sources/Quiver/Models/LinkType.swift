@@ -29,11 +29,14 @@ enum LinkType: String, Sendable, Equatable, Codable {
     var symbol: String {
         switch self {
         case .global: return "globe"
-        case .linkedGlobal: return "link"
-        case .projectLocal: return "folder.fill"
-        case .linkedExternal: return "arrow.up.forward"
+        case .linkedGlobal: return "link"          // symlink → into the global install
+        case .projectLocal: return "folder.fill"   // a real directory
+        case .linkedExternal: return "link"        // symlink → outside the global root
         }
     }
+
+    /// True for the two symlink kinds — used to add an explicit symlink marker in the UI.
+    var isSymlink: Bool { self == .linkedGlobal || self == .linkedExternal }
 
     var tint: Color {
         switch self {

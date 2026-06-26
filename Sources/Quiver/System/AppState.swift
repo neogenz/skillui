@@ -123,8 +123,9 @@ final class AppState {
         autoScanProjects = defaults.object(forKey: K.autoScan) as? Bool ?? true
         githubPAT = Keychain.token() ?? ""
         // Don't auto-refresh in the headless dev hooks (they drive their own scan + exit).
-        let headless = CommandLine.arguments.contains("--scan-dump")
-            || CommandLine.arguments.contains("--render-png")
+        let headless = CommandLine.arguments.contains { a in
+            a.hasPrefix("--render") || a.hasPrefix("--scan") || a.hasPrefix("--login")
+        }
         if !headless { startBackgroundRefresh() }
     }
 
@@ -173,19 +174,24 @@ final class AppState {
         await serialize {
             await self.scan()
             await self.checkUpdates(force: force)
-            if self.autoScanProjects { await self.runProjectScan() }
             self.lastCheckedAt = Date()
         }
+        // Project scan is NOT in the serial block: it touches disjoint state, so globals
+        // appear immediately while the (slower) recursive walk runs in the background.
+        if autoScanProjects { await scanProjects() }
     }
 
     // MARK: Multi-project scan (Dashboard)
 
-    /// Manually rescan all projects under the configured root. Serialized.
-    func rescanProjects() async {
-        await serialize { await self.runProjectScan() }
-    }
+    /// Rescan now, ignoring freshness (Rescan button).
+    func rescanProjects() async { await scanProjects(force: true) }
 
-    private func runProjectScan() async {
+    /// Recursively scan projects under the configured root. Single-flight + TTL-guarded so
+    /// repeated panel opens don't re-walk the whole home.
+    func scanProjects(force: Bool = false) async {
+        if isScanningProjects { return }
+        if !force, let last = lastProjectScanAt,
+           Date().timeIntervalSince(last) < max(0.25, refreshIntervalHours) * 3600 { return }
         isScanningProjects = true
         defer { isScanningProjects = false }
         let rootPath = scanRoot.isEmpty

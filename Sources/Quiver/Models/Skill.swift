@@ -41,11 +41,20 @@ struct Skill: Identifiable, Sendable, Equatable {
     let projectPath: String?    // project root for project-scope skills; nil for global
     var lock: LockEntry?
     var linkType: LinkType = .global   // set by the scanners (global / linked / project-local)
+    var projectGroup: String? = nil    // main repo name (worktrees grouped under it); nil for global
+    var isWorktree: Bool = false       // project is a git worktree of `projectGroup`
 
     var id: String { "\(scope.rawValue)|\(projectPath ?? "~")|\(name)|\(path)" }
 
     /// Short project label for the dashboard (last path component of the project root).
     var projectName: String? { projectPath.map { ($0 as NSString).lastPathComponent } }
+
+    /// Display label: "mainRepo › worktree" for worktrees, else the project name.
+    var projectLabel: String? {
+        guard let name = projectName else { return nil }
+        if isWorktree, let group = projectGroup, group != name { return "\(group) › \(name)" }
+        return name
+    }
 
     var source: String? { lock?.source }
 
