@@ -32,8 +32,6 @@ cp -R "$APPDIR" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "$APP" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 echo "▸ created $DMG"
-shasum -a 256 "$DMG" > "$DMG.sha256"
-echo "▸ checksum $DMG.sha256"
 
 notarize() {
     local artifact="$1"
@@ -61,3 +59,9 @@ if [[ -n "${DEVELOPER_ID:-}" ]]; then
 else
     echo "▸ skipping notarization (set DEVELOPER_ID plus NOTARY_PROFILE or NOTARY_APPLE_ID/NOTARY_APP_PASSWORD/NOTARY_TEAM_ID)"
 fi
+
+# Checksum the FINAL artifact — stapling (above) rewrites the DMG, so this MUST come after it,
+# otherwise the published .sha256 won't match the published DMG. Write a bare filename (run from
+# dist/) so `shasum -a 256 -c` verifies wherever the user downloaded the pair.
+( cd "$ROOT/dist" && shasum -a 256 "$APP-$VERSION.dmg" > "$APP-$VERSION.dmg.sha256" )
+echo "▸ checksum $DMG.sha256"
