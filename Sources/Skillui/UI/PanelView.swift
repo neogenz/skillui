@@ -126,6 +126,13 @@ struct PanelView: View {
                     .font(.system(size: 9)).foregroundStyle(.yellow).help(err)
             }
             Spacer()
+            if app.updateActivity != nil {
+                IconButton(systemName: "doc.text", help: "Open update activity") {
+                    app.presentUpdateActivityWindow()
+                    NSApp.activate(ignoringOtherApps: true)
+                    dismiss()
+                }
+            }
             IconButton(systemName: "macwindow", help: "Open dashboard") {
                 openWindow(id: "dashboard")
                 NSApp.activate(ignoringOtherApps: true)

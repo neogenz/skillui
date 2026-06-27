@@ -5,6 +5,7 @@ import AppKit
 ///   --render-png <path>        the menu-bar panel
 ///   --render-settings <path>   the Settings form
 ///   --render-dashboard <path>  the dashboard window
+///   --render-activity <path>   the update/install activity window
 /// Add --dark for dark mode. SKILLUI_SCAN_ROOT narrows the dashboard project scan.
 /// Pumps the main run loop while the async scan completes (can't block main here).
 enum RenderCLI {
@@ -12,6 +13,7 @@ enum RenderCLI {
         let args = CommandLine.arguments
         let flags: [(flag: String, target: String)] = [
             ("--render-png", "panel"), ("--render-settings", "settings"), ("--render-dashboard", "dashboard"),
+            ("--render-activity", "activity"),
         ]
         var target: String?
         var outPath: String?
@@ -27,7 +29,9 @@ enum RenderCLI {
         Task { @MainActor in
             let app = AppState()
             if let root = ProcessInfo.processInfo.environment["SKILLUI_SCAN_ROOT"] { app.scanRoot = root }
-            await app.refresh()
+            if target != "activity" {
+                await app.refresh()
+            }
 
             let content: AnyView
             let size: CGSize
@@ -38,6 +42,10 @@ enum RenderCLI {
             case "dashboard":
                 content = AnyView(DashboardView().environment(app).frame(width: 980, height: 560))
                 size = CGSize(width: 980, height: 560)
+            case "activity":
+                app.updateActivity = .preview
+                content = AnyView(UpdateActivityView(staticIndicators: true).environment(app).frame(width: 780, height: 520))
+                size = CGSize(width: 780, height: 520)
             default:
                 content = AnyView(PanelView(scrollable: false).environment(app).frame(width: Theme.panelWidth))
                 size = .zero

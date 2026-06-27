@@ -181,3 +181,43 @@ private func writeTempLock(_ json: String) throws -> URL {
     #expect(skills.first?.name == "x")
     #expect(skills.first?.agents == ["Claude Code"])
 }
+
+@Test func skillsCLICommandsAreShellReadable() {
+    let cli = SkillsCLI(invocation: ["/usr/bin/npx", "--yes", "skills"])
+    #expect(cli.updateCommand(name: "impeccable", scope: .global)
+        == "/usr/bin/npx --yes skills update impeccable -g -y")
+    #expect(cli.updateCommand(name: "ui kit", scope: .project, cwd: "/tmp/My Project")
+        == "cd '/tmp/My Project'\n/usr/bin/npx --yes skills update 'ui kit' -p -y")
+    #expect(cli.installFromLockCommand(cwd: "/tmp/Project's Worktree")
+        == "cd '/tmp/Project'\\''s Worktree'\n/usr/bin/npx --yes skills experimental_install -y")
+}
+
+@Test func updateActivityCombinedLogIncludesCommandsAndEmptyOutput() {
+    let first = UpdateActivityItem(title: "Update impeccable",
+                                   command: "npx skills update impeccable -g -y",
+                                   status: .succeeded,
+                                   log: "Done.\n")
+    let second = UpdateActivityItem(title: "Recheck update status", status: .queued)
+    let activity = UpdateActivitySession(title: "Updating 1 skill",
+                                         subtitle: "Testing",
+                                         items: [first, second])
+    #expect(activity.completedCount == 1)
+    #expect(activity.combinedLog.contains("## Update impeccable [Done]"))
+    #expect(activity.combinedLog.contains("$ npx skills update impeccable -g -y"))
+    #expect(activity.combinedLog.contains("## Recheck update status [Queued]"))
+    #expect(activity.combinedLog.contains("(no output)"))
+}
+
+@Test func updateActivityWarningIsFinishedButNotSuccessful() {
+    let item = UpdateActivityItem(title: "Recheck update status",
+                                  status: .warning,
+                                  log: "2 skills still differ from upstream after recheck.")
+    let activity = UpdateActivitySession(title: "Updating 2 skills",
+                                         subtitle: "Testing",
+                                         items: [item])
+    #expect(item.status.isFinished)
+    #expect(activity.completedCount == 1)
+    #expect(activity.warningCount == 1)
+    #expect(activity.failedCount == 0)
+    #expect(activity.combinedLog.contains("[Attention]"))
+}

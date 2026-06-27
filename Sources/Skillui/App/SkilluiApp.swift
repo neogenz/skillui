@@ -41,6 +41,12 @@ struct SkilluiApp: App {
                 .environment(app)
         }
         .defaultSize(width: 560, height: 460)
+
+        Window("Update Activity", id: "update-activity") {
+            UpdateActivityView()
+                .environment(app)
+        }
+        .defaultSize(width: 780, height: 520)
     }
 
     @CommandsBuilder private var appCommands: some Commands {
@@ -77,6 +83,13 @@ private struct MenuBarLabel: View {
                 if app.appUpdateWindowRevision > 0 {
                     NSApplication.shared.setActivationPolicy(.regular)
                     openWindow(id: "app-update")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                }
+            }
+            .onChange(of: app.updateActivityWindowRevision) {
+                if app.updateActivityWindowRevision > 0 {
+                    NSApplication.shared.setActivationPolicy(.regular)
+                    openWindow(id: "update-activity")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
             }

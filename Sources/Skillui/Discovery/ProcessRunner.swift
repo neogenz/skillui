@@ -68,7 +68,7 @@ enum ProcessRunner {
                              cwd: String? = nil,
                              extraEnv: [String: String] = [:],
                              timeoutSeconds: Double = 120,
-                             onOutput: @escaping (String) -> Void) async -> ProcessResult {
+                             onOutput: @escaping @Sendable (String) -> Void) async -> ProcessResult {
         await withCheckedContinuation { (cont: CheckedContinuation<ProcessResult, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()

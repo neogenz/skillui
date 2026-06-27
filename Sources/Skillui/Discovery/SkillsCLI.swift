@@ -43,7 +43,7 @@ struct SkillsCLI: Sendable {
     func update(name: String,
                 scope: Scope,
                 cwd: String? = nil,
-                onOutput: ((String) -> Void)? = nil) async throws -> String {
+                onOutput: (@Sendable (String) -> Void)? = nil) async throws -> String {
         let args = baseArgs + ["update", name, scope.cliFlag, "-y"]
         let r: ProcessResult
         if let onOutput {
@@ -63,7 +63,7 @@ struct SkillsCLI: Sendable {
     /// `skills experimental_install -y` in `cwd` — hydrates a project/worktree's skills from its
     /// `skills-lock.json` (the same command `install-skills.sh` runs). Mutating; user action only.
     @discardableResult
-    func installFromLock(cwd: String, onOutput: ((String) -> Void)? = nil) async throws -> String {
+    func installFromLock(cwd: String, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> String {
         let args = baseArgs + ["experimental_install", "-y"]
         let r: ProcessResult
         if let onOutput {

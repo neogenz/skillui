@@ -4,6 +4,7 @@ enum UpdateActivityStatus: String, Sendable {
     case queued
     case running
     case succeeded
+    case warning
     case failed
     case skipped
 
@@ -12,6 +13,7 @@ enum UpdateActivityStatus: String, Sendable {
         case .queued: return "Queued"
         case .running: return "Running"
         case .succeeded: return "Done"
+        case .warning: return "Attention"
         case .failed: return "Failed"
         case .skipped: return "Skipped"
         }
@@ -20,7 +22,7 @@ enum UpdateActivityStatus: String, Sendable {
     var isFinished: Bool {
         switch self {
         case .queued, .running: return false
-        case .succeeded, .failed, .skipped: return true
+        case .succeeded, .warning, .failed, .skipped: return true
         }
     }
 }
@@ -84,6 +86,7 @@ struct UpdateActivitySession: Identifiable, Sendable {
     var totalCount: Int { items.count }
     var completedCount: Int { items.filter(\.status.isFinished).count }
     var failedCount: Int { items.filter { $0.status == .failed }.count }
+    var warningCount: Int { items.filter { $0.status == .warning }.count }
     var runningCount: Int { items.filter { $0.status == .running }.count }
     var isRunning: Bool { finishedAt == nil && items.contains { !$0.status.isFinished } }
 
@@ -99,7 +102,7 @@ struct UpdateActivitySession: Identifiable, Sendable {
     static var preview: UpdateActivitySession {
         let now = Date()
         return UpdateActivitySession(
-            title: "Updating 26 skills",
+            title: "Updating 2 skills",
             subtitle: "skills update is running across global and project scopes.",
             startedAt: now.addingTimeInterval(-32),
             items: [

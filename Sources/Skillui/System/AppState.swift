@@ -96,6 +96,7 @@ final class AppState {
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
     private var refreshTask: Task<Void, Never>?
+    private static let maxActivityLogCharacters = 200_000
     /// Serial chain: refresh / updateSkill / updateAll run one at a time (never interleave
     /// at await points), so spinners, statuses and the rate limit stay consistent.
     private var tail: Task<Void, Never> = Task {}
@@ -116,7 +117,7 @@ final class AppState {
         return skills.filter { !$0.agents.allSatisfy(hiddenAgents.contains) }
     }
 
-    private func githubToken() -> String? { Keychain.token() }
+    private func githubToken() -> String? { githubPAT.isEmpty ? nil : githubPAT }
 
     var currentAppVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -153,11 +154,11 @@ final class AppState {
         scanRoot = defaults.string(forKey: K.scanRoot) ?? ""
         globalSkillsRootOverride = defaults.string(forKey: K.globalRoot) ?? ""
         autoScanProjects = defaults.object(forKey: K.autoScan) as? Bool ?? true
-        githubPAT = Keychain.token() ?? ""
         // Don't auto-refresh in the headless dev hooks (they drive their own scan + exit).
         let headless = CommandLine.arguments.contains { a in
             a.hasPrefix("--render") || a.hasPrefix("--scan") || a.hasPrefix("--login")
         }
+        githubPAT = headless ? "" : (Keychain.token() ?? "")
         if !headless { startBackgroundRefresh() }
     }
 
@@ -257,6 +258,7 @@ final class AppState {
                                                    items: [item])
             presentUpdateActivityWindow()
         } else {
+            updateActivity?.finishedAt = nil
             updateActivity?.items.append(item)
         }
         return item.id
@@ -271,6 +273,7 @@ final class AppState {
             updateActivity?.items[index].startedAt = Date()
         }
         updateActivity?.items[index].status = status
+        if status == .running { updateActivity?.finishedAt = nil }
         if let command { updateActivity?.items[index].command = command }
         if let message { appendActivityLog(id, message) }
         if status.isFinished { updateActivity?.items[index].finishedAt = Date() }
@@ -280,10 +283,13 @@ final class AppState {
     private func appendActivityLog(_ id: UUID, _ chunk: String) {
         guard !chunk.isEmpty,
               let index = updateActivity?.items.firstIndex(where: { $0.id == id }) else { return }
-        updateActivity?.items[index].log += chunk
-        if !updateActivity!.items[index].log.hasSuffix("\n") {
-            updateActivity?.items[index].log += "\n"
+        var log = updateActivity?.items[index].log ?? ""
+        log += chunk
+        if !log.hasSuffix("\n") { log += "\n" }
+        if log.count > Self.maxActivityLogCharacters {
+            log = "[Earlier output truncated]\n" + String(log.suffix(Self.maxActivityLogCharacters))
         }
+        updateActivity?.items[index].log = log
     }
 
     private func finishActivityWhenSettled() {
@@ -293,7 +299,7 @@ final class AppState {
         }
     }
 
-    private func activityOutputSink(_ id: UUID) -> (String) -> Void {
+    private func activityOutputSink(_ id: UUID) -> @Sendable (String) -> Void {
         { chunk in Task { @MainActor in self.appendActivityLog(id, chunk) } }
     }
 
@@ -305,6 +311,22 @@ final class AppState {
             parts.append(source)
         }
         return parts.joined(separator: " · ")
+    }
+
+    private func remainingUpdatableCount(in targets: [Skill]) -> Int {
+        targets.reduce(into: 0) { count, skill in
+            if effectiveStatus(for: skill) == .updateAvailable { count += 1 }
+        }
+    }
+
+    private func finishRecheckActivity(_ id: UUID, targets: [Skill]) {
+        let remaining = remainingUpdatableCount(in: targets)
+        if remaining > 0 {
+            markActivityItem(id, status: .warning,
+                             message: "\(remaining) skill\(remaining == 1 ? "" : "s") still differ from upstream after recheck.")
+        } else {
+            markActivityItem(id, status: .succeeded, message: "Update status refreshed.")
+        }
     }
 
     var updateCount: Int {
@@ -388,6 +410,8 @@ final class AppState {
         discoveredProjects = projects
         projectScanSkills = found.sorted(by: Self.order)
         lastProjectScanAt = Date()
+        let liveIDs = Set((skills + projectScanSkills).map(\.id))
+        statuses = statuses.filter { liveIDs.contains($0.key) }
 
         // Flag projects whose lockfile declares skills that aren't on disk (a freshly-created
         // worktree never gets its skills hydrated) so the dashboard can offer to reinstall them.
@@ -401,7 +425,7 @@ final class AppState {
         let comparable = projectScanSkills.filter { $0.canCheckUpdate }
         if !comparable.isEmpty {
             for s in comparable where statuses[s.id] != .updateAvailable { statuses[s.id] = .checking }
-            let results = await checker.evaluate(comparable)
+            let results = await checker.evaluate(comparable, force: force)
             for (id, st) in results { statuses[id] = st }
         }
     }
@@ -457,9 +481,7 @@ final class AppState {
             for (path, id) in zip(distinct, itemIDs) {
                 self.markActivityItem(id, status: .running, command: cli.installFromLockCommand(cwd: path))
                 do {
-                    try await cli.installFromLock(cwd: path) { chunk in
-                        Task { @MainActor in self.appendActivityLog(id, chunk) }
-                    }
+                    try await cli.installFromLock(cwd: path, onOutput: self.activityOutputSink(id))
                     self.markActivityItem(id, status: .succeeded, message: "Install completed.")
                 } catch {
                     self.lastError = "Install failed for \((path as NSString).lastPathComponent): \(error.localizedDescription)"
@@ -519,17 +541,48 @@ final class AppState {
         // their turn comes, which is what made extra clicks feel like "nothing happens".
         guard !updatingSkillIDs.contains(skill.id) else { return }
         updatingSkillIDs.insert(skill.id)
+        let itemID = beginUpdateActivity(
+            title: "Updating \(skill.name)",
+            subtitle: "`skills update` is running for one skill.",
+            items: [UpdateActivityItem(title: "Update \(skill.name)",
+                                       subtitle: activitySubtitle(for: skill))]
+        )[0]
         await serialize {
             defer { self.updatingSkillIDs.remove(skill.id) }
-            guard let invocation = await self.resolveCLI() else { return }
+            guard let invocation = await self.resolveCLI() else {
+                self.markActivityItem(itemID, status: .failed, message: "Couldn't find `skills` or `npx`. Set a path in Settings.")
+                return
+            }
+            let cli = SkillsCLI(invocation: invocation)
+            self.markActivityItem(itemID, status: .running,
+                                  command: cli.updateCommand(name: skill.name, scope: skill.scope, cwd: skill.projectPath))
             do {
-                try await SkillsCLI(invocation: invocation)
-                    .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
+                try await cli.update(name: skill.name,
+                                     scope: skill.scope,
+                                     cwd: skill.projectPath,
+                                     onOutput: self.activityOutputSink(itemID))
+                self.markActivityItem(itemID, status: .succeeded, message: "Update completed.")
+                let scanID = self.addActivityItem(title: "Refresh skill index",
+                                                  subtitle: "Rescanning installed skills after the update.")
+                self.markActivityItem(scanID, status: .running)
                 await self.scan()
+                self.markActivityItem(scanID, status: .succeeded, message: "Skill index refreshed.")
+                if skill.scope == .project {
+                    let projectScanID = self.addActivityItem(title: "Refresh project scan",
+                                                             subtitle: "Rescanning project-scope skills after the update.")
+                    self.markActivityItem(projectScanID, status: .running)
+                    await self.scanProjects(force: true)
+                    self.markActivityItem(projectScanID, status: .succeeded, message: "Project scan refreshed.")
+                }
+                let checkID = self.addActivityItem(title: "Recheck update status",
+                                                   subtitle: "Comparing local skill hashes with GitHub.")
+                self.markActivityItem(checkID, status: .running)
                 await self.checkUpdates(force: true)
                 await self.reevaluateProjectStatuses([skill])
+                self.finishRecheckActivity(checkID, targets: [skill])
             } catch {
                 self.lastError = "Update failed for \(skill.name): \(error.localizedDescription)"
+                self.markActivityItem(itemID, status: .failed, message: error.localizedDescription)
             }
         }
     }
@@ -565,19 +618,63 @@ final class AppState {
         let distinct = targets.filter {
             seen.insert("\($0.scope.rawValue)|\($0.projectPath ?? "")|\($0.name)").inserted
         }
+        let itemIDs = beginUpdateActivity(
+            title: distinct.count == 1 ? "Updating 1 skill" : "Updating \(distinct.count) skills",
+            subtitle: "`skills update` is applying available upstream changes.",
+            items: distinct.map { skill in
+                UpdateActivityItem(title: "Update \(skill.name)",
+                                   subtitle: activitySubtitle(for: skill))
+            }
+        )
         await serialize {
             defer { self.updatingSkillIDs.subtract(ids) }
-            guard let invocation = await self.resolveCLI() else { return }
+            guard let invocation = await self.resolveCLI() else {
+                for id in itemIDs {
+                    self.markActivityItem(id, status: .failed, message: "Couldn't find `skills` or `npx`. Set a path in Settings.")
+                }
+                return
+            }
             let cli = SkillsCLI(invocation: invocation)
             // Gate on the live status: a per-row updateSkill that landed first may have already
             // cleared one of these, so re-running `skills update` on it would be redundant.
-            for t in distinct where self.effectiveStatus(for: t) == .updateAvailable {
-                do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
-                catch { self.lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
+            for (t, itemID) in zip(distinct, itemIDs) {
+                guard self.effectiveStatus(for: t) == .updateAvailable else {
+                    self.markActivityItem(itemID, status: .skipped, message: "Already up to date by the time this batch reached it.")
+                    continue
+                }
+                self.markActivityItem(itemID, status: .running,
+                                      command: cli.updateCommand(name: t.name, scope: t.scope, cwd: t.projectPath))
+                do {
+                    try await cli.update(name: t.name,
+                                         scope: t.scope,
+                                         cwd: t.projectPath,
+                                         onOutput: self.activityOutputSink(itemID))
+                }
+                catch {
+                    self.lastError = "Update failed for \(t.name): \(error.localizedDescription)"
+                    self.markActivityItem(itemID, status: .failed, message: error.localizedDescription)
+                    continue
+                }
+                self.markActivityItem(itemID, status: .succeeded, message: "Update completed.")
             }
+            let scanID = self.addActivityItem(title: "Refresh skill index",
+                                              subtitle: "Rescanning installed skills after the batch.")
+            self.markActivityItem(scanID, status: .running)
             await self.scan()
+            self.markActivityItem(scanID, status: .succeeded, message: "Skill index refreshed.")
+            if targets.contains(where: { $0.scope == .project }) {
+                let projectScanID = self.addActivityItem(title: "Refresh project scan",
+                                                         subtitle: "Rescanning project-scope skills after the batch.")
+                self.markActivityItem(projectScanID, status: .running)
+                await self.scanProjects(force: true)
+                self.markActivityItem(projectScanID, status: .succeeded, message: "Project scan refreshed.")
+            }
+            let checkID = self.addActivityItem(title: "Recheck update status",
+                                               subtitle: "Comparing local skill hashes with GitHub.")
+            self.markActivityItem(checkID, status: .running)
             await self.checkUpdates(force: true)
             await self.reevaluateProjectStatuses(targets)
+            self.finishRecheckActivity(checkID, targets: targets)
         }
     }
 

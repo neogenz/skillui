@@ -213,6 +213,14 @@ struct DashboardView: View {
                     .disabled(app.isScanningProjects)
                     .help("Rescan \(rootLabel)")
                 }
+                if app.updateActivity != nil {
+                    ToolbarItem(placement: .navigation) {
+                        Button { app.presentUpdateActivityWindow() } label: {
+                            Label("Activity", systemImage: "doc.text")
+                        }
+                        .help("Open the latest update activity log")
+                    }
+                }
                 if !updatableRows.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Button { Task { await app.updateMany(updatableRows) } } label: {
