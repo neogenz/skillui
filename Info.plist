@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Quiver</string>
+    <string>Skillui</string>
     <key>CFBundleDisplayName</key>
-    <string>Quiver</string>
+    <string>Skillui</string>
     <key>CFBundleIdentifier</key>
-    <string>com.maximedesogus.quiver</string>
+    <string>com.maximedesogus.skillui</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
@@ -15,11 +15,19 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>Quiver</string>
+    <string>Skillui</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>SkilluiReleaseRepository</key>
+    <string>neogenz/skillui</string>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 Maxime Desogus</string>
 </dict>

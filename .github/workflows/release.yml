@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skillui-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build DMG and Publish Release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          TAG="${{ inputs.tag }}"
+          [ -z "$TAG" ] && TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          if [[ "$TAG" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "build=$(git rev-list --count HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify changelog entry
+        run: grep -q "## ${{ steps.meta.outputs.tag }}" CHANGELOG.md
+
+      - name: Extract release notes
+        run: |
+          mkdir -p dist
+          awk '
+            $0 == "## ${{ steps.meta.outputs.tag }}" { capture=1; next }
+            capture && /^## v/ { exit }
+            capture { print }
+          ' CHANGELOG.md > dist/release-notes.md
+          [ -s dist/release-notes.md ] || { echo "No release notes extracted for ${{ steps.meta.outputs.tag }}" >&2; exit 1; }
+
+      - name: Run tests
+        run: swift test
+
+      - name: Validate signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+        run: |
+          [ -n "$APPLE_CERTIFICATE" ] || { echo "APPLE_CERTIFICATE is required" >&2; exit 1; }
+          [ -n "$APPLE_CERTIFICATE_PASSWORD" ] || { echo "APPLE_CERTIFICATE_PASSWORD is required" >&2; exit 1; }
+          [ -n "$NOTARY_APPLE_ID" ] || { echo "NOTARY_APPLE_ID is required" >&2; exit 1; }
+          [ -n "$NOTARY_APP_PASSWORD" ] || { echo "NOTARY_APP_PASSWORD is required" >&2; exit 1; }
+          [ -n "$NOTARY_TEAM_ID" ] || { echo "NOTARY_TEAM_ID is required" >&2; exit 1; }
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Resolve signing identity
+        run: |
+          IDENTITY="$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          [ -n "$IDENTITY" ] || { echo "No Developer ID Application identity found" >&2; exit 1; }
+          echo "DEVELOPER_ID=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build DMG
+        env:
+          SKILLUI_VERSION: ${{ steps.meta.outputs.version }}
+          SKILLUI_BUILD: ${{ steps.meta.outputs.build }}
+          SKILLUI_RELEASE_REPO: ${{ github.repository }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+        run: scripts/make-dmg.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Skillui ${{ steps.meta.outputs.version }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          body_path: dist/release-notes.md
+          files: |
+            dist/Skillui-${{ steps.meta.outputs.version }}.dmg
+            dist/Skillui-${{ steps.meta.outputs.version }}.dmg.sha256

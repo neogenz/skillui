@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Skillui"
+  short_description: "Cut a verified Skillui release"
+  default_prompt: "Prepare and verify a Skillui release"

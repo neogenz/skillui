@@ -1,4 +1,4 @@
-# Quiver — Product Requirements (MVP)
+# Skillui — Product Requirements (MVP)
 
 ## Problem
 
@@ -35,6 +35,8 @@ wants a glanceable, trustworthy way to see and maintain them.
 - **One-click update** via `skills update`, with immediate feedback even while another runs.
 - **System**: menu-bar-only (no Dock icon), launch-at-login, background refresh, Settings
   (scan root, global root, CLI path, GitHub PAT, refresh interval, per-agent visibility, project folders).
+- **Application updates**: manual and background GitHub Releases checks, native Software Update window,
+  release notes, and DMG download/open flow.
 - **Privacy**: scan defaults to dev roots (`~/workspace`, `~/Developer`, `~/code`, …); hard-excludes
   Documents, Desktop, Downloads, Music, Pictures, Movies, Library — never lists their contents.
 
@@ -45,6 +47,7 @@ wants a glanceable, trustworthy way to see and maintain them.
 - Historical/time-series tracking of versions.
 - skills.sh enrichment (stars, descriptions, security audit).
 - Windows/Linux; App Store distribution.
+- Silent self-replacement updater; the MVP keeps system frameworks only and opens the release DMG.
 
 ## Tech stack & constraints
 
@@ -60,7 +63,8 @@ wants a glanceable, trustworthy way to see and maintain them.
 ## Distribution
 
 - Code-signed + notarized DMG (`scripts/make-dmg.sh` with a Developer ID; ad-hoc for local).
-- macOS 14+.
+- GitHub Releases upload via `.github/workflows/release.yml`; release notes sourced from `CHANGELOG.md`.
+- macOS 26+.
 
 ## Known limitations
 

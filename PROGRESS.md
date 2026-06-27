@@ -1,4 +1,4 @@
-# Quiver — Build Progress
+# Skillui — Build Progress
 
 Menu-bar app: unified cross-agent view of skills.sh-installed skills, with update detection.
 
@@ -33,7 +33,7 @@ Menu-bar app: unified cross-agent view of skills.sh-installed skills, with updat
 - [x] **Visual rework** — OpenUsage / System-Settings grouped aesthetic (opaque tray + borderless
   `.fill.quaternary` cards, radius 12, light/dark parity) + menu-bar update-count badge + design
   tokens (port-killer-inspired). Both refs cloned + studied.
-- [x] **Unit tests** — `Tests/QuiverTests` (Swift Testing, 12 green): path resolution, both lock
+- [x] **Unit tests** — `Tests/SkilluiTests` (Swift Testing, 12 green): path resolution, both lock
   schemas + malformed tolerance, Skill derivations, root-level skill, SHA-compare decision, GitHub
   tree parsing, CLI JSON noise tolerance.
 - [x] **Adversarial review (-x)** — 2 parallel reviewers (concurrency + data-layer). Resolved:

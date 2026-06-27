@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Build a release Quiver.app and package it into a DMG.
+# Build a release Skillui.app and package it into a DMG.
 #
 # Local/dev: produces an ad-hoc-signed DMG (runs on THIS Mac; Gatekeeper will warn on
 # other Macs). For distribution, export these first:
 #   DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
-#   NOTARY_PROFILE="quiver-notary"   # a stored `notarytool` keychain profile
+#   NOTARY_PROFILE="skillui-notary"   # a stored `notarytool` keychain profile
+# or, in CI:
+#   NOTARY_APPLE_ID / NOTARY_APP_PASSWORD / NOTARY_TEAM_ID
 # then re-run — the script signs with hardened runtime, notarizes, and staples.
 set -euo pipefail
 
-APP="Quiver"
+APP="${SKILLUI_APP_NAME:-Skillui}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+VERSION="${SKILLUI_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Info.plist")}"
 
 bash scripts/build-app.sh release
 APPDIR="$ROOT/dist/$APP.app"
@@ -22,19 +25,39 @@ else
     echo "▸ no DEVELOPER_ID set — keeping ad-hoc signature (DMG will NOT be notarized)"
 fi
 
-DMG="$ROOT/dist/$APP.dmg"
+DMG="$ROOT/dist/$APP-$VERSION.dmg"
 STAGE="$(mktemp -d)"               # ephemeral; removed by the trap below
 trap 'rm -rf "$STAGE"' EXIT        # safe: only the temp staging dir we just created
 cp -R "$APPDIR" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "$APP" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 echo "▸ created $DMG"
+shasum -a 256 "$DMG" > "$DMG.sha256"
+echo "▸ checksum $DMG.sha256"
 
-if [[ -n "${DEVELOPER_ID:-}" && -n "${NOTARY_PROFILE:-}" ]]; then
+notarize() {
+    local artifact="$1"
+    if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+        xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" --wait
+    elif [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_APP_PASSWORD:-}" && -n "${NOTARY_TEAM_ID:-}" ]]; then
+        xcrun notarytool submit "$artifact" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --password "$NOTARY_APP_PASSWORD" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --wait
+    else
+        return 1
+    fi
+}
+
+if [[ -n "${DEVELOPER_ID:-}" ]]; then
     echo "▸ notarizing (this can take a few minutes)…"
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$DMG"
-    echo "▸ notarized + stapled"
+    if notarize "$DMG"; then
+        xcrun stapler staple "$DMG"
+        echo "▸ notarized + stapled"
+    else
+        echo "▸ skipping notarization (set NOTARY_PROFILE or NOTARY_APPLE_ID/NOTARY_APP_PASSWORD/NOTARY_TEAM_ID)"
+    fi
 else
-    echo "▸ skipping notarization (set DEVELOPER_ID + NOTARY_PROFILE to enable)"
+    echo "▸ skipping notarization (set DEVELOPER_ID plus NOTARY_PROFILE or NOTARY_APPLE_ID/NOTARY_APP_PASSWORD/NOTARY_TEAM_ID)"
 fi

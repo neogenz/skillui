@@ -5,3 +5,17 @@ dist/
 .swiftpm/
 
 .claude/worktrees/
+
+# Signing / notarization material — never commit. Private keys live in the Keychain.
+*.cer
+*.certSigningRequest
+*.p12
+*.pem
+*.key
+*.mobileprovision
+*.p8
+
+# Vendored third-party skills: declared in skills-lock.json, restored via `skills install`.
+# Track only this project's OWN skills (add a "!" line for each new custom skill).
+.agents/skills/*
+!.agents/skills/release-skillui/
