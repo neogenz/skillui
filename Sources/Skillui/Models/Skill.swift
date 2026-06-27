@@ -43,6 +43,7 @@ struct Skill: Identifiable, Sendable, Equatable {
     var linkType: LinkType = .global   // set by the scanners (global / linked / project-local)
     var projectGroup: String? = nil    // main repo name (worktrees grouped under it); nil for global
     var isWorktree: Bool = false       // project is a git worktree of `projectGroup`
+    var localFileCount: Int? = nil     // files in the install folder; gates single-file root checks (nil = unknown)
 
     var id: String { "\(scope.rawValue)|\(projectPath ?? "~")|\(name)|\(path)" }
 
@@ -62,13 +63,19 @@ struct Skill: Identifiable, Sendable, Equatable {
     var isTracked: Bool { lock?.source != nil }
 
     /// True when update detection is possible: a global skill with a stored git tree SHA, or a
-    /// project-local root `SKILL.md` lock whose upstream single-file hash can be computed exactly.
+    /// project-local root `SKILL.md` package that is a *single file* — only then does the lock's
+    /// `computedHash` equal the CLI's `computeSingleFileSkillHash`, letting us hash the upstream
+    /// SKILL.md identically. A multi-file root folder hashes its whole contents
+    /// (`computeSkillFolderHash`), which a single-file comparison can never match, so it falls back
+    /// to `.unsupported` rather than emitting a permanent false "update available".
+    /// `localFileCount == nil` (unknown) keeps the skill checkable to preserve prior behavior.
     var canCheckUpdate: Bool {
         guard lock?.source != nil, lock?.skillPath != nil else { return false }
         if lock?.skillFolderHash != nil { return true }   // global: has a git tree SHA
         guard linkType == .projectLocal,
               lock?.computedHash != nil,
-              repoFolder == "" else { return false }
+              repoFolder == "",
+              (localFileCount ?? 1) == 1 else { return false }
         return true
     }
 

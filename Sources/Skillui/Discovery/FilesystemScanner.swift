@@ -48,8 +48,42 @@ struct FilesystemScanner: Sendable {
             return Skill(name: name, path: acc.canonicalPath, scope: .project,
                          agents: Array(acc.agents).sorted(), projectPath: root,
                          lock: lock[name], linkType: link,
-                         projectGroup: meta.mainRepo ?? meta.name, isWorktree: meta.isWorktree)
+                         projectGroup: meta.mainRepo ?? meta.name, isWorktree: meta.isWorktree,
+                         localFileCount: Self.fileCountForSingleFileCheck(lock[name], link: link, path: acc.canonicalPath))
         }
         .sorted { $0.name < $1.name }
+    }
+
+    /// File count for the single-file gate, computed only for the skills that can use it — a
+    /// project-local skill whose lock points at a root `SKILL.md`. Everything else returns `nil`
+    /// (cheap: no walk for the common subfolder / linked / global cases).
+    static func fileCountForSingleFileCheck(_ lock: LockEntry?, link: LinkType, path: String) -> Int? {
+        guard link == .projectLocal, lock?.computedHash != nil, lock?.skillPath == "SKILL.md"
+        else { return nil }
+        return installedFileCount(at: path)
+    }
+
+    /// Counts the files in an installed skill folder the way the skills CLI's
+    /// `computeSkillFolderHash` does — recursive, skipping `.git` and `node_modules`. A count of 1
+    /// means the folder is a lone `SKILL.md`, so its `computedHash` equals `computeSingleFileSkillHash`.
+    static func installedFileCount(at path: String) -> Int? {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue,
+              let en = fm.enumerator(at: URL(fileURLWithPath: path),
+                                     includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                                     options: [])
+        else { return nil }
+        var count = 0
+        for case let url as URL in en {
+            let vals = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+            if vals?.isDirectory == true {
+                let n = url.lastPathComponent
+                if n == ".git" || n == "node_modules" { en.skipDescendants() }
+            } else if vals?.isRegularFile == true {
+                count += 1
+            }
+        }
+        return count
     }
 }

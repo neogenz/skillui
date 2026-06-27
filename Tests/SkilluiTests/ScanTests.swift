@@ -160,7 +160,16 @@ private func tempDir() throws -> URL {
     let rootLock = LockEntry(source: "me/repo", skillPath: "SKILL.md", computedHash: "deadbeef")
     let root = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
                      agents: ["Shared"], projectPath: "/p", lock: rootLock, linkType: .projectLocal)
-    #expect(root.canCheckUpdate)
+    #expect(root.canCheckUpdate)                                  // unknown count → checkable (prior behavior)
+
+    // A single-file root folder matches the CLI's single-file hash → checkable.
+    var single = root; single.localFileCount = 1
+    #expect(single.canCheckUpdate)
+
+    // A multi-file root folder hashes its whole contents (computeSkillFolderHash), which the
+    // single-file comparison can never match → not checkable (avoids a permanent false update).
+    var multi = root; multi.localFileCount = 3
+    #expect(!multi.canCheckUpdate)
 
     let nestedLock = LockEntry(source: "me/repo", skillPath: "skills/x/SKILL.md", computedHash: "deadbeef")
     let nested = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
@@ -170,6 +179,35 @@ private func tempDir() throws -> URL {
     let external = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
                          agents: ["Shared"], projectPath: "/p", lock: rootLock, linkType: .linkedExternal)
     #expect(!external.canCheckUpdate)
+}
+
+@Test func scannerGatesMultiFileRootSkillFromUpdateCheck() throws {
+    // A project-local skill with skillPath "SKILL.md" but extra sibling files in its folder has a
+    // folder-hash `computedHash`; the scanner must mark it not-checkable so it never shows a
+    // permanent false "update available".
+    let fm = FileManager.default
+    let base = try tempDir()
+    let proj = base.appendingPathComponent("proj")
+    let skills = proj.appendingPathComponent(".agents/skills")
+
+    let single = skills.appendingPathComponent("single-root")
+    try fm.createDirectory(at: single, withIntermediateDirectories: true)
+    try "# single".write(to: single.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+    let multi = skills.appendingPathComponent("multi-root")
+    try fm.createDirectory(at: multi, withIntermediateDirectories: true)
+    try "# multi".write(to: multi.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+    try "ref".write(to: multi.appendingPathComponent("reference.md"), atomically: true, encoding: .utf8)
+
+    let lockJSON = #"{ "version":1, "skills": { "single-root": { "source":"me/repo", "skillPath":"SKILL.md", "computedHash":"aaa" }, "multi-root": { "source":"me/repo", "skillPath":"SKILL.md", "computedHash":"bbb" } } }"#
+    try lockJSON.write(to: proj.appendingPathComponent("skills-lock.json"), atomically: true, encoding: .utf8)
+
+    let scanned = FilesystemScanner(globalRoots: []).scanProject(proj.path)
+    let byName = Dictionary(uniqueKeysWithValues: scanned.map { ($0.name, $0) })
+    #expect(byName["single-root"]?.localFileCount == 1)
+    #expect(byName["single-root"]?.canCheckUpdate == true)
+    #expect(byName["multi-root"]?.localFileCount == 2)
+    #expect(byName["multi-root"]?.canCheckUpdate == false)
 }
 
 @Test func skillProjectLabelShowsWorktreeUnderMainRepo() {

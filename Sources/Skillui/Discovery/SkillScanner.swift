@@ -34,9 +34,11 @@ struct SkillScanner: Sendable {
             do {
                 for c in try await cli.list(scope: .project, cwd: root) {
                     let link = LinkClassifier.classify(path: c.path, scope: .project, globalRoots: globalRoots)
+                    let lk = projLock[c.name]
                     result.append(Skill(name: c.name, path: c.path, scope: .project,
-                                        agents: c.agents, projectPath: root, lock: projLock[c.name],
-                                        linkType: link))
+                                        agents: c.agents, projectPath: root, lock: lk,
+                                        linkType: link,
+                                        localFileCount: FilesystemScanner.fileCountForSingleFileCheck(lk, link: link, path: c.path)))
                 }
             } catch {
                 if firstError == nil {
