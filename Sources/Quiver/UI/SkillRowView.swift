@@ -7,6 +7,7 @@ struct SkillRowView: View {
     let skill: Skill
     let status: UpdateStatus
     @Environment(AppState.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
 
     private var isUpdating: Bool { app.updatingSkillIDs.contains(skill.id) }
@@ -38,6 +39,13 @@ struct SkillRowView: View {
         .onHover { hovering = $0 }
         .onTapGesture { open(skill.skillsShURL) }
         .help(skill.skillsShURL.map { "Open \($0.absoluteString)" } ?? skill.name)
+        // The row-wide tap is invisible to VoiceOver; expose it as a named action while the
+        // inner Update / GitHub buttons stay independently focusable.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(skill.name)
+        .accessibilityAction(named: "Open on skills.sh") { open(skill.skillsShURL) }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: status)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -46,7 +54,7 @@ struct SkillRowView: View {
                 ProgressView().controlSize(.small).scaleEffect(0.8).frame(width: 28)
             } else if status == .updateAvailable {
                 Button("Update") { Task { await app.updateSkill(skill) } }
-                    .buttonStyle(.borderedProminent).tint(Theme.amber).controlSize(.small)
+                    .prominentAction().controlSize(.small)
                     .help("Run `skills update \(skill.name)`")
             }
             if skill.githubURL != nil {

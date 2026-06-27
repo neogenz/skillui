@@ -23,8 +23,10 @@ struct StatusBadge: View {
         case .checking:
             ProgressView().controlSize(.mini).scaleEffect(0.65).frame(width: 12, height: 12)
         case .upToDate:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 10)).foregroundStyle(Theme.statusOK.opacity(0.85)).help("Up to date")
+            // The quiet default: a tertiary check, not a saturated green badge. With most rows
+            // up to date, green-everywhere is noise — muting it makes an amber update unmissable.
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary).help("Up to date")
         case .failed(let msg):
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 9)).foregroundStyle(Theme.statusWarn).help(msg)
@@ -34,26 +36,44 @@ struct StatusBadge: View {
     }
 }
 
-/// Compact agent presence: a few tinted glyphs + overflow count. THE cross-agent signal.
+/// Compact agent presence — THE cross-agent signal. A hand-picked subset shows as tinted
+/// glyphs (which agents matters); the shared-dir "installed everywhere" case collapses to an
+/// honest count, because a row of identical icons + "+29" said the same nothing on every row.
 struct AgentChips: View {
     let agents: [String]
+    /// Glass capsule in the low-density panel; flat fill in the dense dashboard table.
+    var glass = true
     private let maxShown = 5
+
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(agents.prefix(maxShown), id: \.self) { a in
-                let st = AgentRegistry.style(for: a)
-                Image(systemName: st.symbol)
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(st.tint)
-                    .frame(width: 15, height: 15)
-                    .background(st.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .help(a)
+        if agents.count > maxShown {
+            countPill
+        } else {
+            HStack(spacing: 3) {
+                ForEach(agents, id: \.self) { a in
+                    let st = AgentRegistry.style(for: a)
+                    Image(systemName: st.symbol)
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(st.tint)
+                        .frame(width: 15, height: 15)
+                        .background(st.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .help(a)
+                }
             }
-            if agents.count > maxShown {
-                Text("+\(agents.count - maxShown)")
-                    .font(.system(size: 8.5, weight: .medium)).foregroundStyle(.secondary)
-                    .help(agents.dropFirst(maxShown).joined(separator: ", "))
-            }
+        }
+    }
+
+    @ViewBuilder private var countPill: some View {
+        let label = Label("\(agents.count) agents", systemImage: "square.grid.2x2.fill")
+            .labelStyle(.titleAndIcon)
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .help(agents.joined(separator: ", "))
+        if glass {
+            label.chipSurface()
+        } else {
+            label.background(.fill.quaternary, in: Capsule())
         }
     }
 }

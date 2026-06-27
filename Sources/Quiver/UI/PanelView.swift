@@ -5,6 +5,7 @@ struct PanelView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
     /// When false, the list is laid out without a ScrollView (used by the PNG renderer,
     /// since ImageRenderer can't rasterize ScrollView content).
     var scrollable = true
@@ -40,7 +41,7 @@ struct PanelView: View {
                 Button { Task { await app.updateAll() } } label: {
                     Text("Update all").font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.borderedProminent).tint(Theme.amber).controlSize(.small)
+                .prominentAction().controlSize(.small)
                 .help("Update all \(app.updateCount) skills")
             }
             if busy {
@@ -98,6 +99,13 @@ struct PanelView: View {
 
     private var listBody: some View {
         VStack(spacing: Theme.Spacing.xl) {
+            // The one thing worth your attention leads. When there's nothing to do, a calm
+            // affirmation takes its place instead of making you scan the list to be sure.
+            if !updatable.isEmpty {
+                UpdatesSection(skills: updatable)
+            } else if hasTracked {
+                CaughtUpBanner()
+            }
             ForEach(sections) { sec in
                 SectionView(scope: sec.scope, tracked: sec.tracked, untracked: sec.untracked)
             }
@@ -110,7 +118,7 @@ struct PanelView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             if let d = app.lastCheckedAt {
-                Text("Checked \(Self.relative.localizedString(for: d, relativeTo: Date()))")
+                Text(Self.checkedLabel(d))
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             if let err = app.lastError {
@@ -121,8 +129,13 @@ struct PanelView: View {
             IconButton(systemName: "macwindow", help: "Open dashboard") {
                 openWindow(id: "dashboard")
                 NSApp.activate(ignoringOtherApps: true)
+                dismiss()   // close the menu-bar panel once we've navigated away (HIG)
             }
-            IconButton(systemName: "gearshape", help: "Settings") { openSettings() }
+            IconButton(systemName: "gearshape", help: "Settings") {
+                openSettings()
+                NSApp.activate(ignoringOtherApps: true)
+                dismiss()
+            }
             IconButton(systemName: "power", help: "Quit Quiver") { NSApplication.shared.terminate(nil) }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
@@ -131,6 +144,13 @@ struct PanelView: View {
     private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated; return f
     }()
+
+    /// "Checked just now" within the last minute (RelativeDateTimeFormatter renders ~now as the
+    /// nonsensical "in 0 seconds"), else a relative phrase.
+    private static func checkedLabel(_ date: Date) -> String {
+        if Date().timeIntervalSince(date) < 60 { return "Checked just now" }
+        return "Checked \(relative.localizedString(for: date, relativeTo: Date()))"
+    }
 
     // MARK: Sections
 
@@ -141,9 +161,21 @@ struct PanelView: View {
         var id: String { scope.rawValue }
     }
 
+    /// Skills with an update ready — surfaced in a single group at the top so the one
+    /// actionable thing leads, instead of sitting buried in its scope section below the
+    /// up-to-date skills (which is what made you scroll past "nothing to do").
+    private var updatable: [Skill] {
+        app.visibleSkills
+            .filter { app.effectiveStatus(for: $0) == .updateAvailable }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var hasTracked: Bool { app.visibleSkills.contains { $0.isTracked } }
+
     private var sections: [PanelSection] {
-        Scope.allCases.compactMap { scope in
-            let inScope = app.visibleSkills.filter { $0.scope == scope }
+        let updatableIDs = Set(updatable.map(\.id))
+        return Scope.allCases.compactMap { scope in
+            let inScope = app.visibleSkills.filter { $0.scope == scope && !updatableIDs.contains($0.id) }
             guard !inScope.isEmpty else { return nil }
             let tracked = inScope.filter { $0.isTracked }.sorted { rank($0) < rank($1) }
             let untracked = inScope.filter { !$0.isTracked }
@@ -165,6 +197,47 @@ struct PanelView: View {
 private struct ContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// The lead group when anything needs updating: every updatable skill, across scopes, in one
+/// card at the top — so the action is the first thing you see, not something you scroll to.
+private struct UpdatesSection: View {
+    let skills: [Skill]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 11)).foregroundStyle(Theme.amber)
+                Text("UPDATES AVAILABLE").font(.system(size: 10, weight: .bold)).tracking(0.5)
+                    .foregroundStyle(Theme.amber)
+                Text("· \(skills.count)").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                ForEach(Array(skills.enumerated()), id: \.element.id) { i, s in
+                    SkillRowView(skill: s, status: .updateAvailable)
+                    if i < skills.count - 1 { Divider().padding(.leading, 12) }
+                }
+            }
+            .cardSurface()
+        }
+    }
+}
+
+/// The calm state: shown in place of the updates group when every tracked skill is current.
+private struct CaughtUpBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 14)).foregroundStyle(Theme.statusOK)
+            Text("You're all caught up").font(.system(size: 12, weight: .semibold))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
 }
 
 /// One scope group: a titled card with tracked rows + a collapsible "Untracked" list.

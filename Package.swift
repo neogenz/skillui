@@ -7,7 +7,7 @@ import PackageDescription
 // (the bundle is what makes MenuBarExtra + SMAppService behave correctly).
 let package = Package(
     name: "Quiver",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],   // Liquid Glass baseline — Tahoe or newer
     targets: [
         .executableTarget(
             name: "Quiver",

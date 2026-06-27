@@ -19,7 +19,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 Maxime Desogus</string>
 </dict>

@@ -52,6 +52,17 @@ extension View {
                 .overlay { Theme.cardShape.fill(Theme.cardFill) }
         }
     }
+
+    /// Primary call-to-action, styled with Liquid Glass — the functional layer floating over
+    /// content. The brand amber carries the tint.
+    func prominentAction(tint: Color = Theme.amber) -> some View {
+        buttonStyle(.glassProminent).tint(tint)
+    }
+
+    /// Small capsule chip surface rendered in Liquid Glass.
+    func chipSurface() -> some View {
+        glassEffect(.regular, in: .capsule)
+    }
 }
 
 extension Color {

@@ -263,7 +263,11 @@ final class AppState {
     /// Marks the row "updating" immediately (before the serial queue) so a click during an
     /// in-flight update gives instant feedback instead of appearing to do nothing.
     func updateSkill(_ skill: Skill) async {
-        guard !updatingSkillIDs.contains(skill.id) else { return }   // ignore repeat clicks
+        // Flip the row to its spinner the instant the user clicks — and dedupe: ignore repeat
+        // taps while this skill is already queued or running. Marking here (not inside the
+        // serialized op) means queued skills show feedback immediately instead of only when
+        // their turn comes, which is what made extra clicks feel like "nothing happens".
+        guard !updatingSkillIDs.contains(skill.id) else { return }
         updatingSkillIDs.insert(skill.id)
         await serialize {
             defer { self.updatingSkillIDs.remove(skill.id) }
@@ -273,30 +277,57 @@ final class AppState {
                     .update(name: skill.name, scope: skill.scope, cwd: skill.projectPath)
                 await self.scan()
                 await self.checkUpdates(force: true)
+                await self.reevaluateProjectStatuses([skill])
             } catch {
                 self.lastError = "Update failed for \(skill.name): \(error.localizedDescription)"
             }
         }
     }
 
-    /// Update every skill currently flagged `updateAvailable`, then a single rescan/recheck.
+    /// Re-evaluate update status for specific project-scope skills directly from their (now
+    /// changed) on-disk folder. Used after an update instead of a full recursive project
+    /// re-walk: the walk is slow — pinning the row spinner for its whole duration — and its
+    /// `isScanningProjects` single-flight guard can silently drop a forced run while a
+    /// background refresh / Rescan is mid-walk, leaving the just-updated badge stale.
+    private func reevaluateProjectStatuses(_ candidates: [Skill]) async {
+        let checkable = candidates.filter { $0.scope == .project && $0.canCheckUpdate }
+        guard !checkable.isEmpty else { return }
+        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        let results = await checker.evaluate(checkable, force: true)
+        for (id, st) in results { statuses[id] = st }
+    }
+
+    /// Update every skill the panel currently flags `updateAvailable` (global + configured roots).
     func updateAll() async {
-        let targets = skills.filter { statuses[$0.id] == .updateAvailable && !updatingSkillIDs.contains($0.id) }
+        await updateMany(skills.filter { statuses[$0.id] == .updateAvailable })
+    }
+
+    /// Update a specific set of skills — e.g. the dashboard's current filtered view, which is
+    /// drawn from the recursive project scan rather than `skills`. Serialized like the rest.
+    func updateMany(_ targets: [Skill]) async {
         guard !targets.isEmpty else { return }
-        for t in targets { updatingSkillIDs.insert(t.id) }          // immediate feedback on all
+        // Light every target row's spinner at once so the whole batch reads as "in progress".
+        let ids = Set(targets.map(\.id))
+        for id in ids { updatingSkillIDs.insert(id) }
+        // One `skills update` per distinct on-disk skill: the recursive scan can list the same
+        // folder several times (shared agent dirs, worktrees), and a single update covers them all.
+        var seen = Set<String>()
+        let distinct = targets.filter {
+            seen.insert("\($0.scope.rawValue)|\($0.projectPath ?? "")|\($0.name)").inserted
+        }
         await serialize {
-            guard let invocation = await self.resolveCLI() else {
-                for t in targets { self.updatingSkillIDs.remove(t.id) }
-                return
-            }
+            defer { self.updatingSkillIDs.subtract(ids) }
+            guard let invocation = await self.resolveCLI() else { return }
             let cli = SkillsCLI(invocation: invocation)
-            for t in targets {
+            // Gate on the live status: a per-row updateSkill that landed first may have already
+            // cleared one of these, so re-running `skills update` on it would be redundant.
+            for t in distinct where self.effectiveStatus(for: t) == .updateAvailable {
                 do { try await cli.update(name: t.name, scope: t.scope, cwd: t.projectPath) }
                 catch { self.lastError = "Update failed for \(t.name): \(error.localizedDescription)" }
-                self.updatingSkillIDs.remove(t.id)
             }
             await self.scan()
             await self.checkUpdates(force: true)
+            await self.reevaluateProjectStatuses(targets)
         }
     }
 
