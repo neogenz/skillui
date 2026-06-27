@@ -22,6 +22,10 @@ struct ProjectFinder: Sendable {
         "Movies", "Public", "Mobile Documents", "Creative Cloud Files",
     ]
     static let markers = [".agents/skills", ".claude/skills", ".codex/skills", ".cursor/skills"]
+    /// Agent worktree containers that live INSIDE a project, under otherwise-skipped dot dirs.
+    /// Claude Code / Codex create git worktrees here, and those are exactly the ones that often
+    /// miss their skills — so descend into them explicitly even though `.claude` etc. are skipped.
+    static let worktreeContainers = [".claude/worktrees", ".codex/worktrees", ".cursor/worktrees"]
 
     private var homePath: String { homeOverrideForTesting ?? FileManager.default.homeDirectoryForCurrentUser.path }
 
@@ -42,7 +46,11 @@ struct ProjectFinder: Sendable {
 
     private func walk(_ dir: URL, depth: Int, into out: inout [String]) {
         if depth > maxDepth { return }
-        if isProject(dir) { out.append(dir.path); return }   // leaf: don't descend into a project
+        if isProject(dir) {
+            out.append(dir.path)
+            walkAgentWorktrees(of: dir, depth: depth, into: &out)   // its worktrees live under skipped dot dirs
+            return                                                  // don't descend into normal project contents
+        }
         guard depth < maxDepth,
               let entries = try? FileManager.default.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
@@ -52,6 +60,23 @@ struct ProjectFinder: Sendable {
             let vals = try? e.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard vals?.isDirectory == true, vals?.isSymbolicLink != true else { continue }
             walk(e, depth: depth + 1, into: &out)
+        }
+    }
+
+    /// Enumerate a project's agent worktrees (`.claude/worktrees/*`, …) — the general walk skips
+    /// those dot dirs, but the worktrees inside are real projects (each with its own lockfile).
+    private func walkAgentWorktrees(of project: URL, depth: Int, into out: inout [String]) {
+        let fm = FileManager.default
+        for container in Self.worktreeContainers {
+            let dir = project.appendingPathComponent(container)
+            guard let entries = try? fm.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [])
+            else { continue }
+            for e in entries {
+                let vals = try? e.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                guard vals?.isDirectory == true, vals?.isSymbolicLink != true else { continue }
+                walk(e, depth: depth + 1, into: &out)
+            }
         }
     }
 }

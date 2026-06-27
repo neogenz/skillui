@@ -24,6 +24,10 @@ final class AppState {
     var discoveredProjects: [String] = []
     var isScanningProjects = false
     var lastProjectScanAt: Date?
+    /// Worktrees whose lockfile declares skills that aren't installed (fresh worktrees, etc.).
+    var worktreeGaps: [WorktreeGap] = []
+    /// Project roots currently running `skills experimental_install` (drives the install spinner).
+    var installingPaths: Set<String> = []
 
     // MARK: Settings (persisted to UserDefaults)
 
@@ -213,6 +217,12 @@ final class AppState {
         projectScanSkills = found.sorted(by: Self.order)
         lastProjectScanAt = Date()
 
+        // Flag projects whose lockfile declares skills that aren't on disk (a freshly-created
+        // worktree never gets its skills hydrated) so the dashboard can offer to reinstall them.
+        worktreeGaps = await Task.detached(priority: .utility) {
+            Self.computeWorktreeGaps(projects: projects, installed: found)
+        }.value
+
         // Evaluate update status for comparable project skills (project-local via local git
         // tree SHA, grouped per repo). Linked-global skills are mapped via effectiveStatus.
         let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
@@ -222,6 +232,42 @@ final class AppState {
             let results = await checker.evaluate(comparable)
             for (id, st) in results { statuses[id] = st }
         }
+    }
+
+    /// Pure gap detection (runs off-main): a project is "incomplete" when its `skills-lock.json`
+    /// names skills that the on-disk scan didn't find. Covers worktrees with zero installed skills
+    /// too, since `ProjectFinder` lists any dir that has a lockfile.
+    nonisolated static func computeWorktreeGaps(projects: [String], installed: [Skill]) -> [WorktreeGap] {
+        let byPath = Dictionary(grouping: installed, by: { $0.projectPath ?? "" })
+        var gaps: [WorktreeGap] = []
+        for path in projects {
+            let lock = LockfileParser.read(LockfileParser.projectLockURL(projectRoot: path))
+            guard !lock.isEmpty else { continue }
+            let have = Set((byPath[path] ?? []).map(\.name))
+            let missing = lock.keys.filter { !have.contains($0) }.sorted()
+            guard !missing.isEmpty else { continue }
+            let meta = GitInfo.meta(for: path)
+            gaps.append(WorktreeGap(path: path, name: meta.name, group: meta.mainRepo ?? meta.name,
+                                    isWorktree: meta.isWorktree, missing: missing, expected: lock.count))
+        }
+        return gaps.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    /// Hydrate one project/worktree's skills from its lockfile, then rescan so the gap clears and
+    /// the restored skills appear. Serialized like the other mutating ops.
+    func installMissingSkills(at path: String) async {
+        guard !installingPaths.contains(path) else { return }
+        installingPaths.insert(path)
+        await serialize {
+            defer { self.installingPaths.remove(path) }
+            guard let invocation = await self.resolveCLI() else { return }
+            do {
+                try await SkillsCLI(invocation: invocation).installFromLock(cwd: path)
+            } catch {
+                self.lastError = "Install failed for \((path as NSString).lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+        await scanProjects(force: true)
     }
 
     /// True when any update check failed due to GitHub rate limiting — surfaced as a banner

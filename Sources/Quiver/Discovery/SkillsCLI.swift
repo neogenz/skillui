@@ -48,6 +48,17 @@ struct SkillsCLI: Sendable {
         return r.combinedString
     }
 
+    /// `skills experimental_install -y` in `cwd` — hydrates a project/worktree's skills from its
+    /// `skills-lock.json` (the same command `install-skills.sh` runs). Mutating; user action only.
+    @discardableResult
+    func installFromLock(cwd: String) async throws -> String {
+        let r = await ProcessRunner.run(launchPath: launchPath,
+                                        args: baseArgs + ["experimental_install", "-y"],
+                                        cwd: cwd, dropStderr: false)
+        guard r.status == 0 else { throw CLIError.nonZero(r.status, r.combinedString) }
+        return r.combinedString
+    }
+
     /// Tolerate stray bytes around the JSON (e.g. a one-time npx install notice).
     static func jsonSlice(_ data: Data) -> Data {
         guard let start = data.firstIndex(of: UInt8(ascii: "[")),

@@ -35,6 +35,43 @@ private func tempDir() throws -> URL {
     #expect(!found.contains { $0.contains("/Music") })         // protected folder never entered
 }
 
+@Test func projectFinderFindsAgentWorktrees() throws {
+    let fm = FileManager.default
+    let home = try tempDir()
+    let proj = home.appendingPathComponent("work/repo")
+    try fm.createDirectory(at: proj.appendingPathComponent(".agents/skills/foo"), withIntermediateDirectories: true)
+    // A Claude Code worktree under .claude/worktrees: the general walk skips `.claude`, but this
+    // must still be found — it's where freshly-created, un-hydrated worktrees live.
+    let wt = proj.appendingPathComponent(".claude/worktrees/feature-x")
+    try fm.createDirectory(at: wt, withIntermediateDirectories: true)
+    try Data("{\"skills\":{}}".utf8).write(to: wt.appendingPathComponent("skills-lock.json"))
+
+    let found = ProjectFinder(root: home.path, homeOverrideForTesting: home.path).find()
+        .map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+    #expect(found.contains(proj.resolvingSymlinksInPath().path))
+    #expect(found.contains(wt.resolvingSymlinksInPath().path))   // worktree under .claude/worktrees discovered
+}
+
+@Test func computeWorktreeGapsDetectsMissingLockedSkills() throws {
+    let proj = try tempDir()
+    // Lockfile declares two skills…
+    try Data("{\"skills\":{\"alpha\":{},\"beta\":{}}}".utf8)
+        .write(to: proj.appendingPathComponent("skills-lock.json"))
+    // …but only "alpha" is installed on disk → "beta" is the gap.
+    let alpha = Skill(name: "alpha", path: proj.appendingPathComponent(".agents/skills/alpha").path,
+                      scope: .project, agents: ["Shared"], projectPath: proj.path)
+    let gaps = AppState.computeWorktreeGaps(projects: [proj.path], installed: [alpha])
+    #expect(gaps.count == 1)
+    #expect(gaps.first?.missing == ["beta"])
+    #expect(gaps.first?.expected == 2)
+    #expect(gaps.first?.installedCount == 1)
+
+    // With both installed, no gap is reported.
+    let beta = Skill(name: "beta", path: proj.appendingPathComponent(".agents/skills/beta").path,
+                     scope: .project, agents: ["Shared"], projectPath: proj.path)
+    #expect(AppState.computeWorktreeGaps(projects: [proj.path], installed: [alpha, beta]).isEmpty)
+}
+
 @Test func linkClassifierDistinguishesLocalLinkedExternal() throws {
     let fm = FileManager.default
     let base = try tempDir()

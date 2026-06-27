@@ -84,6 +84,42 @@ struct DashboardView: View {
         .background(Theme.statusWarn.opacity(0.12))
     }
 
+    /// Offers to hydrate worktrees whose lockfile lists skills that never got installed.
+    private var gapBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shippingbox.fill").foregroundStyle(Theme.amber)
+            // "worktree" isn't in the inflection dictionary, so pluralize by hand.
+            Text("\(app.worktreeGaps.count) worktree\(app.worktreeGaps.count == 1 ? "" : "s") missing skills from their lockfile")
+                .font(.system(size: 11))
+            Spacer()
+            Menu {
+                if app.worktreeGaps.count > 1 {
+                    Button("Install all (\(app.worktreeGaps.count))") {
+                        Task { for gap in app.worktreeGaps { await app.installMissingSkills(at: gap.path) } }
+                    }
+                    Divider()
+                }
+                ForEach(app.worktreeGaps) { gap in
+                    Button {
+                        Task { await app.installMissingSkills(at: gap.path) }
+                    } label: {
+                        Text("\(gap.label) — ^[\(gap.missing.count) skill](inflect: true)")
+                    }
+                    .disabled(app.installingPaths.contains(gap.path))
+                }
+            } label: {
+                if app.installingPaths.isEmpty {
+                    Label("Install missing", systemImage: "arrow.down.circle")
+                } else {
+                    Label("Installing…", systemImage: "arrow.clockwise")
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.amber.opacity(0.1))
+    }
+
     /// A project that spans several worktrees expands to them; a single-checkout project is a leaf.
     @ViewBuilder private func projectRow(_ group: String) -> some View {
         let trees = worktrees(in: group)
@@ -133,6 +169,7 @@ struct DashboardView: View {
 
     private var detailPane: some View {
         VStack(spacing: 0) {
+            if !app.worktreeGaps.isEmpty { gapBanner }
             if app.isRateLimited && app.githubPAT.isEmpty { rateLimitBanner }
             table
         }
