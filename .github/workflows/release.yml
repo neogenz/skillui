@@ -18,8 +18,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate first on a cheap runner: if no signing secrets are configured, the real
+  # release job is SKIPPED (neutral), not failed — so a tag published locally (via
+  # scripts/release.sh) never leaves a red ❌ here. Add the secrets to turn CI
+  # publishing on; until then this stays cleanly idle.
+  gate:
+    name: Check signing secrets
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.check.outputs.signed }}
+    steps:
+      - name: Detect signing secrets
+        id: check
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=CI release skipped::No APPLE_CERTIFICATE secret configured — skipping the CI build/publish. This tag was (or should be) published locally with scripts/release.sh; see docs/release.md. Add the five signing secrets to publish via CI instead."
+          fi
+
   release:
     name: Build DMG and Publish Release
+    needs: gate
+    if: needs.gate.outputs.signed == 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6

@@ -123,31 +123,45 @@ xcrun stapler validate "dist/Skillui-$VERSION.dmg"    # → The validate action 
 
 (`spctl` on the bare `.dmg` reporting "no usable signature" is expected and harmless.)
 
-### 3. Commit, tag
+### 3. Commit + pin the target
 ```bash
-git add CHANGELOG.md Info.plist
+git add CHANGELOG.md            # + Info.plist only if you bumped CFBundleShortVersionString
 git commit -m "release: Skillui $VERSION"
-git tag -a "$TAG" -m "Skillui $VERSION"
+REL_SHA=$(git rev-parse HEAD)   # pin the release to this exact commit (safe under parallel work)
 ```
+The tag is created by your chosen publish path below — not here — so it always lands on `$REL_SHA`.
 
-### 4. Publish — pick ONE path; both produce the identical template
+### 4. Publish — choose the path by whether CI signing secrets are set
 
-**Path A — CI (canonical, preferred).** Push the tag; `release.yml` rebuilds, signs, notarizes,
-extracts the changelog section, and publishes the Release with both assets. Requires the repo
-signing secrets (listed below) to be set.
+Creating the tag (either path) triggers `.github/workflows/release.yml`. That workflow **gates on
+the `APPLE_CERTIFICATE` secret**: with the signing secrets set it builds + publishes; without them
+the build job is **skipped cleanly** (no failed run). The two paths are therefore mutually
+exclusive — pick by configuration, never run both:
+
+- **Secrets configured → Path A (CI).** Don't build locally; push the tag and let CI publish.
+- **Secrets absent → Path B (local).** Build + notarize here (steps 2–3), publish with `gh`; CI
+  sees the tag and skips.
+
+Both paths produce the identical release template.
+
+**Path A — CI.** Push the tag; `release.yml` rebuilds, signs, notarizes, extracts the changelog
+section, and publishes the Release with both assets. Requires the repo signing secrets (listed
+below). Do NOT also run Path B for the same tag.
 
 ```bash
-git push origin main          # or the release branch
-git push origin "$TAG"
+git push origin main
+git tag -a "$TAG" -m "Skillui $VERSION"
+git push origin "$TAG"        # triggers release.yml → CI builds, signs, notarizes, publishes
 gh run watch                  # follow the Release workflow to green
 ```
 
-**Path B — local direct publish.** Use the DMG you just notarized in step 2 and publish with
-`gh`, matching the template exactly. Use this when CI secrets are absent or you want to ship from
-this Mac.
+**Path B — local direct publish.** Use when CI secrets are absent (CI will skip on the tag).
+Publish the DMG you notarized in steps 2–3 with `gh`, matching the template exactly. Pin the
+release to the exact commit with `--target "$REL_SHA"` (capture `REL_SHA=$(git rev-parse HEAD)`
+after the release commit) so it doesn't drift if `main` advances.
 
 ```bash
-git push origin "$TAG"        # the release still needs the tag on the remote
+git push origin main          # the release commit must be on the remote for --target
 # extract the notes for THIS version, same awk contract as release.yml:
 awk -v tag="## $TAG" '
   $0 == tag { capture=1; next }
@@ -158,6 +172,7 @@ awk -v tag="## $TAG" '
 
 PRERELEASE=""; [[ "$TAG" == *-* ]] && PRERELEASE="--prerelease"
 gh release create "$TAG" \
+  --target "$REL_SHA" \         # gh creates the tag at this commit (CI gate skips: no secrets)
   --title "Skillui $VERSION" \
   --notes-file dist/release-notes.md \
   $PRERELEASE \

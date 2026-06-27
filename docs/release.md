@@ -82,12 +82,23 @@ The script verifies `CHANGELOG.md`, runs tests, builds `dist/Skillui-<version>.d
 
 ## Publish
 
-```bash
-git tag -a v0.1.0 -m "Skillui 0.1.0"
-git push origin v0.1.0
-```
+Two mutually exclusive paths — pick by whether the CI signing secrets above are configured. The
+`release-skillui` skill drives either one deterministically end to end; the summary:
 
-The Release workflow runs tests, builds the DMG, notarizes it, extracts the matching changelog section, and uploads the DMG plus checksum to GitHub Releases.
+- **CI (secrets configured).** Push the tag; `release.yml` builds, signs, notarizes, extracts the
+  matching changelog section, and uploads the DMG + checksum.
+
+  ```bash
+  git tag -a v0.1.0 -m "Skillui 0.1.0"
+  git push origin v0.1.0
+  ```
+
+- **Local (no secrets).** Build the signed DMG with the flow above, then publish with
+  `gh release create`. `release.yml` gates on `APPLE_CERTIFICATE`: when it's absent the tag's
+  workflow run is **skipped cleanly** (no failed run), so a locally-published tag never leaves a
+  red ❌ in Actions.
+
+Do not run both paths for the same tag.
 
 ## Update Flow
 
