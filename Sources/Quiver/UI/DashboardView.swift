@@ -126,11 +126,7 @@ struct DashboardView: View {
         if trees.count > 1 {
             DisclosureGroup {
                 ForEach(trees) { tree in
-                    Label(tree.name, systemImage: tree.isMain ? "shippingbox.fill" : "arrow.triangle.branch")
-                        .badge(tree.count)
-                        .tag(Nav.worktree(group: group, path: tree.path))
-                        .help(tree.path)
-                        .contextMenu { revealButton(tree.path) }
+                    worktreeLabel(tree, group: group)
                 }
             } label: {
                 Label(group, systemImage: "shippingbox")
@@ -139,13 +135,30 @@ struct DashboardView: View {
                     .help("\(group) — \(trees.count) worktrees")
                     .contextMenu { revealButton(mainPath(trees)) }
             }
+        } else if let only = trees.first {
+            worktreeLabel(only, group: group, leaf: true)
         } else {
-            Label(group, systemImage: "shippingbox")
-                .badge(projectCount(group))
-                .tag(Nav.project(group))
-                .help(group)
-                .contextMenu { revealButton(trees.first?.path ?? "") }
+            Label(group, systemImage: "shippingbox").badge(projectCount(group)).tag(Nav.project(group))
         }
+    }
+
+    /// One worktree row — flagged with a warning when its lockfile lists skills that aren't installed.
+    @ViewBuilder private func worktreeLabel(_ tree: WorktreeNode, group: String, leaf: Bool = false) -> some View {
+        let icon = tree.missing > 0 ? "exclamationmark.triangle.fill"
+            : leaf ? "shippingbox" : (tree.isMain ? "shippingbox.fill" : "arrow.triangle.branch")
+        Label(tree.name, systemImage: icon)
+            .badge(tree.count)
+            .tag(leaf ? Nav.project(group) : Nav.worktree(group: group, path: tree.path))
+            .help(tree.missing > 0 ? "\(tree.path)\n\(tree.missing) skills declared but not installed" : tree.path)
+            .contextMenu {
+                revealButton(tree.path)
+                if tree.missing > 0 {
+                    Button("Install \(tree.missing) missing skill\(tree.missing == 1 ? "" : "s")", systemImage: "arrow.down.circle") {
+                        Task { await app.installMissingSkills(at: tree.path) }
+                    }
+                    .disabled(app.installingPaths.contains(tree.path))
+                }
+            }
     }
 
     @ViewBuilder private func revealButton(_ path: String) -> some View {
@@ -337,7 +350,11 @@ struct DashboardView: View {
     // MARK: Derived state
 
     private var projectGroups: [String] {
-        Array(Set(app.dashboardSkills.compactMap { $0.projectGroup }))
+        // Include groups that only show up via gaps (a worktree with a lockfile but no installed
+        // skills) so the tree lists it even before anything is hydrated.
+        let fromSkills = app.dashboardSkills.compactMap { $0.projectGroup }
+        let fromGaps = app.worktreeGaps.map(\.group)
+        return Array(Set(fromSkills + fromGaps))
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -353,16 +370,24 @@ struct DashboardView: View {
 
     /// One node per distinct worktree (by its on-disk root) inside a repo group; main checkout first.
     private struct WorktreeNode: Identifiable, Hashable {
-        let group: String, path: String, name: String, count: Int, isMain: Bool
+        let group: String, path: String, name: String, count: Int, isMain: Bool, missing: Int
         var id: String { path }
     }
     private func worktrees(in group: String) -> [WorktreeNode] {
         let byPath = Dictionary(grouping: app.dashboardSkills.filter { $0.projectGroup == group },
                                 by: { $0.projectPath ?? "" })
-        return byPath.map { path, skills in
-            let s = skills[0]
-            return WorktreeNode(group: group, path: path, name: s.projectName ?? group,
-                                count: skills.count, isMain: !s.isWorktree)
+        // Worktrees that have a lockfile but nothing (or little) installed only show up as gaps —
+        // union them in so the tree lists them, flagged, instead of hiding them until hydrated.
+        let gaps = Dictionary(app.worktreeGaps.filter { $0.group == group }.map { ($0.path, $0) },
+                              uniquingKeysWith: { a, _ in a })
+        let paths = Set(byPath.keys).union(gaps.keys)
+        return paths.map { path -> WorktreeNode in
+            let skills = byPath[path] ?? []
+            let gap = gaps[path]
+            let name = skills.first?.projectName ?? gap?.name ?? (path as NSString).lastPathComponent
+            let isMain = skills.first.map { !$0.isWorktree } ?? !(gap?.isWorktree ?? false)
+            return WorktreeNode(group: group, path: path, name: name,
+                                count: skills.count, isMain: isMain, missing: gap?.missing.count ?? 0)
         }
         .sorted { ($0.isMain ? 0 : 1, $0.name.lowercased()) < ($1.isMain ? 0 : 1, $1.name.lowercased()) }
     }
