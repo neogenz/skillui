@@ -18,13 +18,29 @@ this skill must never diverge.
 | Version        | `<version>` — semver, e.g. `0.2.0` or `0.2.0-beta.1`              |
 | Git tag        | `v<version>` (annotated)                                           |
 | Release title  | `Skillui <version>`                                                |
-| Prerelease     | `true` iff the tag contains `-` (e.g. `-beta.1`), else `false`    |
+| Prerelease     | `true` iff the tag contains `-` (e.g. `-beta.1`), else `false`. Pre-releases are NOT offered by the in-app updater — see the note below. |
 | Release notes  | the `## v<version>` section of `CHANGELOG.md`, verbatim           |
 | Assets         | `Skillui-<version>.dmg` and `Skillui-<version>.dmg.sha256`        |
 | Target repo    | `Info.plist` → `SkilluiReleaseRepository` (currently `neogenz/skillui`) |
 
-The in-app updater reads `…/releases/latest` and renders the release **notes** to users, so the
-`CHANGELOG.md` section is the single source of release text. Write it for humans.
+### Stable vs pre-release — what the in-app updater sees
+
+The in-app updater (`AppReleaseChecker`, `Sources/Skillui/Updates/AppReleaseChecker.swift`)
+queries `GET /releases/latest`, which GitHub resolves to the newest **non-prerelease** release.
+Two consequences follow, and they decide the tag you choose:
+
+- A **stable** release (no `-` in the tag, `prerelease=false`) is the one **"Check for Updates"
+  offers to users**, and the matching `## v<version>` section of `CHANGELOG.md` is the single
+  source of the notes it renders — so write that section for humans.
+- A **pre-release** (any tag with `-`, e.g. `v0.1.0-beta.1`, `prerelease=true`) is deliberately
+  **invisible to the updater**: `/releases/latest` skips it, so no installed app is ever
+  auto-offered the beta. Its DMG is still downloadable from the Releases page — it just isn't
+  pushed to users.
+
+So: ship a **stable** release when you want every user updated; ship a **pre-release** for betas
+you want available for manual download but not auto-installed. (To make pre-releases
+discoverable in-app you'd have to change the checker to read `/releases` instead of
+`/releases/latest` — that is a deliberate code change, not the default.)
 
 ## CHANGELOG entry template (fixed structure)
 
