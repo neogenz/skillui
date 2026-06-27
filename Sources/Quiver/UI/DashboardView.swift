@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var search = ""
     @State private var selection = Set<Skill.ID>()
     @State private var sortOrder = [KeyPathComparator(\Skill.name)]
+    @State private var expandedGroups: [String: Bool] = [:]
 
     /// Sidebar selection = the active filter. One control instead of three.
     enum Nav: Hashable {
@@ -124,7 +125,7 @@ struct DashboardView: View {
     @ViewBuilder private func projectRow(_ group: String) -> some View {
         let trees = worktrees(in: group)
         if trees.count > 1 {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: expansion(for: group, trees: trees)) {
                 ForEach(trees) { tree in
                     worktreeLabel(tree, group: group)
                 }
@@ -140,6 +141,15 @@ struct DashboardView: View {
         } else {
             Label(group, systemImage: "shippingbox").badge(projectCount(group)).tag(Nav.project(group))
         }
+    }
+
+    /// Projects with an incomplete worktree start expanded so it's seen, not buried; the user's
+    /// own collapse/expand wins after that.
+    private func expansion(for group: String, trees: [WorktreeNode]) -> Binding<Bool> {
+        Binding(
+            get: { expandedGroups[group] ?? trees.contains { $0.missing > 0 } },
+            set: { expandedGroups[group] = $0 }
+        )
     }
 
     /// One worktree row — flagged with a warning when its lockfile lists skills that aren't installed.
