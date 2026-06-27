@@ -21,6 +21,7 @@ final class AppState {
     var requestPATFocus = false
     /// True when a token exists but macOS refused non-interactive Keychain access.
     var githubCredentialNeedsAttention = false
+    var githubCredentialStatus: GitHubCredentialStatus = .unknown
 
     // Application self-update (GitHub Releases DMG)
     var appUpdateResult: AppUpdateResult?
@@ -75,13 +76,8 @@ final class AppState {
     var autoScanProjects: Bool {
         didSet { defaults.set(autoScanProjects, forKey: K.autoScan) }
     }
-    /// GitHub PAT — stored in the Keychain, never UserDefaults.
-    var githubPAT: String {
-        didSet {
-            guard !isLoadingGitHubPAT else { return }
-            Keychain.setToken(githubPAT.isEmpty ? nil : githubPAT)
-        }
-    }
+    /// GitHub PAT entered during this run. Persist only through `saveGitHubPAT(_:)`.
+    var githubPAT: String
     /// Launch-at-login, reflected straight from SMAppService.
     var launchAtLogin: Bool {
         get { LoginItem.isEnabled }
@@ -101,9 +97,8 @@ final class AppState {
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
     private var refreshTask: Task<Void, Never>?
-    private var isLoadingGitHubPAT = false
     private static let maxActivityLogCharacters = 200_000
-    private static let githubCredentialAttentionMessage = "GitHub token needs one-time Keychain approval in Settings."
+    private static let githubCredentialAttentionMessage = "GitHub token needs explicit Keychain authorization or replacement in Settings."
     /// Serial chain: refresh / updateSkill / updateAll run one at a time (never interleave
     /// at await points), so spinners, statuses and the rate limit stay consistent.
     private var tail: Task<Void, Never> = Task {}
@@ -113,6 +108,13 @@ final class AppState {
         case usable(String?)
         /// A token appears to exist, but macOS refused non-interactive access to it.
         case needsAttention(String)
+    }
+
+    enum GitHubCredentialStatus: Equatable {
+        case unknown
+        case configured
+        case missing
+        case needsAttention
     }
 
     private func serialize(_ op: @escaping @MainActor () async -> Void) async {
@@ -131,20 +133,30 @@ final class AppState {
         return skills.filter { !$0.agents.allSatisfy(hiddenAgents.contains) }
     }
 
+    var hasConfiguredGitHubCredential: Bool {
+        if !githubPAT.isEmpty { return true }
+        if case .configured = githubCredentialStatus { return true }
+        return false
+    }
+
     private func githubCredential() -> GitHubCredential {
         if !githubPAT.isEmpty {
             githubCredentialNeedsAttention = false
+            githubCredentialStatus = .configured
             return .usable(githubPAT)
         }
         switch Keychain.readToken(allowInteraction: false) {
         case .success(let token):
             githubCredentialNeedsAttention = false
+            githubCredentialStatus = .configured
             return .usable(token)
         case .notFound:
             githubCredentialNeedsAttention = false
+            githubCredentialStatus = .missing
             return .usable(nil)
         case .interactionRequired, .failed:
             githubCredentialNeedsAttention = true
+            githubCredentialStatus = .needsAttention
             return .needsAttention(Self.githubCredentialAttentionMessage)
         }
     }
@@ -155,18 +167,74 @@ final class AppState {
         }
     }
 
-    func loadGitHubPATForEditing() {
-        guard githubPAT.isEmpty else { return }
-        switch Keychain.readToken(allowInteraction: true) {
-        case .success(let token):
+    func refreshGitHubCredentialStatus() {
+        if !githubPAT.isEmpty {
             githubCredentialNeedsAttention = false
-            isLoadingGitHubPAT = true
-            githubPAT = token
-            isLoadingGitHubPAT = false
+            githubCredentialStatus = .configured
+            return
+        }
+        switch Keychain.readToken(allowInteraction: false) {
+        case .success:
+            githubCredentialNeedsAttention = false
+            githubCredentialStatus = .configured
         case .notFound:
             githubCredentialNeedsAttention = false
+            githubCredentialStatus = .missing
         case .interactionRequired, .failed:
             githubCredentialNeedsAttention = true
+            githubCredentialStatus = .needsAttention
+        }
+    }
+
+    @discardableResult
+    func saveGitHubPAT(_ token: String) -> Bool {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return clearGitHubPAT() }
+        let status = Keychain.setToken(trimmed)
+        guard status == errSecSuccess else {
+            githubPAT = ""
+            githubCredentialNeedsAttention = true
+            githubCredentialStatus = .needsAttention
+            return false
+        }
+        githubPAT = trimmed
+        githubCredentialNeedsAttention = false
+        githubCredentialStatus = .configured
+        return true
+    }
+
+    @discardableResult
+    func clearGitHubPAT() -> Bool {
+        let status = Keychain.setToken(nil)
+        githubPAT = ""
+        guard status == errSecSuccess else {
+            githubCredentialNeedsAttention = true
+            githubCredentialStatus = .needsAttention
+            return false
+        }
+        githubCredentialNeedsAttention = false
+        githubCredentialStatus = .missing
+        return true
+    }
+
+    @discardableResult
+    func authorizeStoredGitHubPAT() -> Bool {
+        switch Keychain.readToken(allowInteraction: true) {
+        case .success(let token):
+            githubPAT = token
+            githubCredentialNeedsAttention = false
+            githubCredentialStatus = .configured
+            return true
+        case .notFound:
+            githubPAT = ""
+            githubCredentialNeedsAttention = false
+            githubCredentialStatus = .missing
+            return true
+        case .interactionRequired, .failed:
+            githubPAT = ""
+            githubCredentialNeedsAttention = true
+            githubCredentialStatus = .needsAttention
+            return false
         }
     }
 

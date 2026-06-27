@@ -3,6 +3,8 @@ import AppKit
 
 struct SettingsView: View {
     @Environment(AppState.self) private var app
+    @State private var githubPATDraft = ""
+    @State private var githubTokenMessage: String?
     @FocusState private var focus: Field?
 
     private enum Field { case cliPath, pat }
@@ -62,13 +64,55 @@ struct SettingsView: View {
 
                 settingsSection("GitHub") {
                     if app.githubCredentialNeedsAttention {
-                        caption("macOS blocked silent access to the stored token. Approve Always Allow once for the signed Skillui app, or paste the token again to replace the old dev entry.")
+                        caption("macOS is protecting an older saved token. Skillui will not prompt automatically; authorize it explicitly below or paste a replacement token.")
                         rowDivider
                     }
-                    settingsRow("Personal access token") {
-                        SecureField("", text: $app.githubPAT, prompt: Text("optional"))
+                    settingsRow("Stored token") {
+                        Label(githubCredentialTitle, systemImage: githubCredentialIcon)
+                            .font(.system(size: 12))
+                            .foregroundStyle(githubCredentialColor)
+                    }
+                    rowDivider
+                    settingsRow("Replace token") {
+                        SecureField("", text: $githubPATDraft, prompt: Text("paste token"))
                             .settingsTextField(focused: focus == .pat)
                             .focused($focus, equals: .pat)
+                    }
+                    rowDivider
+                    HStack(spacing: 8) {
+                        if app.githubCredentialStatus == .needsAttention {
+                            Button("Authorize existing token...") {
+                                if app.authorizeStoredGitHubPAT() {
+                                    githubTokenMessage = "Token authorized. Future GitHub checks should run without a Keychain prompt."
+                                } else {
+                                    githubTokenMessage = "Authorization did not complete. Choose Always Allow in the macOS prompt, or paste a replacement token."
+                                }
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Button("Clear", role: .destructive) {
+                            if app.clearGitHubPAT() {
+                                githubPATDraft = ""
+                                githubTokenMessage = "Stored token cleared. GitHub checks will use unauthenticated rate limits."
+                            } else {
+                                githubTokenMessage = "macOS blocked deleting the stored token. Authorize it first or remove com.maximedesogus.skillui in Keychain Access."
+                            }
+                        }
+                        Button("Save token") {
+                            if app.saveGitHubPAT(githubPATDraft) {
+                                githubPATDraft = ""
+                                githubTokenMessage = "Token saved. Future GitHub checks will use the signed app's Keychain item."
+                            } else {
+                                githubTokenMessage = "macOS blocked replacing the old Keychain item. Authorize the existing token or delete com.maximedesogus.skillui in Keychain Access once."
+                            }
+                        }
+                        .disabled(githubPATDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    if let githubTokenMessage {
+                        rowDivider
+                        caption(githubTokenMessage)
                     }
                     rowDivider
                     settingsRow("Token setup") {
@@ -127,13 +171,39 @@ struct SettingsView: View {
         .background(Theme.traySurface)
         .frame(width: 460, height: 540)
         .task {
-            app.loadGitHubPATForEditing()
+            app.refreshGitHubCredentialStatus()
             // When opened from the rate-limit banner, focus the token field (not the first field).
             if app.requestPATFocus {
                 app.requestPATFocus = false
                 try? await Task.sleep(for: .milliseconds(120))   // let the default first-responder settle, then override
                 focus = .pat
             }
+        }
+    }
+
+    private var githubCredentialTitle: String {
+        switch app.githubCredentialStatus {
+        case .unknown: "Not checked"
+        case .configured: "Configured"
+        case .missing: "Not configured"
+        case .needsAttention: "Needs authorization"
+        }
+    }
+
+    private var githubCredentialIcon: String {
+        switch app.githubCredentialStatus {
+        case .unknown: "circle"
+        case .configured: "checkmark.circle.fill"
+        case .missing: "minus.circle"
+        case .needsAttention: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var githubCredentialColor: Color {
+        switch app.githubCredentialStatus {
+        case .unknown, .missing: Color(nsColor: .secondaryLabelColor)
+        case .configured: Theme.statusOK
+        case .needsAttention: Theme.statusWarn
         }
     }
 

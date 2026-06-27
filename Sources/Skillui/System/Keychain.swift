@@ -26,15 +26,34 @@ enum Keychain {
         return context
     }
 
-    static func setToken(_ token: String?) {
-        var delete = base
-        delete[kSecUseAuthenticationContext as String] = authenticationContext(allowInteraction: false)
-        SecItemDelete(delete as CFDictionary)
-        guard let token, !token.isEmpty, let data = token.data(using: .utf8) else { return }
-        var add = base
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+    @discardableResult
+    static func setToken(_ token: String?) -> OSStatus {
+        guard let token, !token.isEmpty, let data = token.data(using: .utf8) else {
+            var delete = base
+            delete[kSecUseAuthenticationContext as String] = authenticationContext(allowInteraction: false)
+            let status = SecItemDelete(delete as CFDictionary)
+            return status == errSecItemNotFound ? errSecSuccess : status
+        }
+
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+
+        var update = base
+        update[kSecUseAuthenticationContext as String] = authenticationContext(allowInteraction: false)
+        let updateStatus = SecItemUpdate(update as CFDictionary, attributes as CFDictionary)
+        switch updateStatus {
+        case errSecSuccess:
+            return errSecSuccess
+        case errSecItemNotFound:
+            var add = base
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            return SecItemAdd(add as CFDictionary, nil)
+        default:
+            return updateStatus
+        }
     }
 
     static func readToken(allowInteraction: Bool = false) -> ReadResult {

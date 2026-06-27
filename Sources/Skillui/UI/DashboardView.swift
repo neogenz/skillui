@@ -88,7 +88,7 @@ struct DashboardView: View {
     private var keychainBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "key.fill").foregroundStyle(Theme.statusWarn)
-            Text("GitHub token needs one-time Keychain approval. Open Settings and choose Always Allow when macOS asks.")
+            Text("GitHub token is protected by Keychain. Authorize the existing token or replace it in Settings.")
                 .font(.system(size: 11))
             Spacer()
             Button("Open Settings") { app.requestPATFocus = true; openSettings() }.controlSize(.small)
@@ -206,7 +206,7 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             if !app.worktreeGaps.isEmpty { gapBanner }
             if app.githubCredentialNeedsAttention { keychainBanner }
-            if app.isRateLimited && app.githubPAT.isEmpty { rateLimitBanner }
+            if app.isRateLimited && !app.hasConfiguredGitHubCredential { rateLimitBanner }
             table
         }
             .navigationTitle(navTitle)
