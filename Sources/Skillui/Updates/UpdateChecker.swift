@@ -1,16 +1,18 @@
 import Foundation
 
-/// Computes each skill's `UpdateStatus` by comparing its installed folder tree SHA against
-/// the upstream one. Skills are grouped by (repo, ref) so we make ONE tree request per repo
-/// (covering all its folders) and resolve the default branch once. The installed SHA is
-/// per-skill, so the verdict is decided per skill — never shared across folders sharing a repo.
+/// Computes each skill's `UpdateStatus`.
+///
+/// Global locks carry `skillFolderHash`, a Git tree SHA, so they compare against GitHub's tree.
+/// Project v1 locks carry `computedHash`, a skills-CLI SHA-256. Those hashes are not comparable
+/// to Git tree SHAs; only root `SKILL.md` project skills can be checked exactly by hashing the
+/// upstream file the same way the CLI does.
 struct UpdateChecker: Sendable {
     let token: String?
     var cache: UpdateCacheStore? = nil
 
     private var gh: GitHubClient { GitHubClient(token: token) }
 
-    /// Pure decision: compare installed folder tree SHA against the latest upstream one.
+    /// Pure decision: compare the installed lock hash against the latest upstream hash.
     static func decide(installed: String, latest: String?) -> UpdateStatus {
         guard let latest else { return .failed("skill folder not found upstream") }
         return latest == installed ? .upToDate : .updateAvailable
@@ -51,67 +53,72 @@ struct UpdateChecker: Sendable {
             switch tree {
             case .failed(let msg):
                 out[s.id] = .failed(msg)
-            case .ok(let map, let root):
-                guard let installed = await installedTreeSHA(for: s) else { out[s.id] = .unsupported; continue }
-                let folder = s.repoFolder ?? ""
-                let latest = folder.isEmpty ? root : map[folder]
-                out[s.id] = Self.decide(installed: installed, latest: latest)
+            case .ok(let map, let root, let ref):
+                if let installed = s.lock?.skillFolderHash, !installed.isEmpty {
+                    let folder = s.repoFolder ?? ""
+                    let latest = folder.isEmpty ? root : map[folder]
+                    out[s.id] = Self.decide(installed: installed, latest: latest)
+                    continue
+                }
+                if let installed = s.lock?.computedHash,
+                   let skillPath = s.lock?.skillPath,
+                   s.repoFolder == "" {
+                    let latest = await latestSingleFileHash(repo: repo, ref: ref, path: skillPath)
+                    out[s.id] = Self.decide(installed: installed, latest: latest)
+                    continue
+                }
+                out[s.id] = .unsupported
             }
         }
         return out
     }
 
-    /// Installed folder tree SHA: the lockfile's git tree SHA if present (global), else the
-    /// git tree SHA computed from the local folder (project-local), cached by signature.
-    private func installedTreeSHA(for s: Skill) async -> String? {
-        if let h = s.lock?.skillFolderHash, !h.isEmpty { return h }
-        guard s.linkType == .projectLocal else { return nil }
-        let url = URL(fileURLWithPath: s.path)
-        let sig = GitTreeHasher.signature(url)
-        if let cached = await cache?.localTree(s.path), cached.signature == sig { return cached.sha }
-        guard let sha = GitTreeHasher.treeSHA(url) else { return nil }
-        await cache?.setLocalTree(s.path, .init(signature: sig, sha: sha))
-        return sha
+    private func latestSingleFileHash(repo: String, ref: String, path: String) async -> String? {
+        guard let data = try? await gh.fileContents(repo: repo, path: path, ref: ref) else { return nil }
+        return SkillsContentHasher.singleFileHash(contents: data)
     }
 
     private enum TreeOutcome {
-        case ok(map: [String: String], root: String?)
+        case ok(map: [String: String], root: String?, ref: String)
         case failed(String)
     }
 
     private func treeMap(repo: String, storedRef: String?, ttl: TimeInterval, force: Bool) async -> TreeOutcome {
         let cacheKey = "\(repo)@\(storedRef ?? "")"
 
-        // Fresh-enough cache → no network.
-        if !force, let store = cache, let e = await store.tree(cacheKey),
-           Date().timeIntervalSince(e.checkedAt) < ttl {
-            return .ok(map: e.folderSHAs, root: e.rootSHA)
-        }
-
-        do {
-            // Resolve ref once (cache the default branch — lockfiles usually omit `ref`).
-            let ref: String
-            if let storedRef {
-                ref = storedRef
-            } else if let store = cache, let cached = await store.branch(repo) {
-                ref = cached
-            } else {
+        let ref: String
+        if let storedRef {
+            ref = storedRef
+        } else if let store = cache, let cached = await store.branch(repo) {
+            ref = cached
+        } else {
+            do {
                 let resolved = try await gh.defaultBranch(repo: repo)
                 await cache?.setBranch(repo, resolved)
                 ref = resolved
+            } catch {
+                return .failed(error.localizedDescription)
             }
+        }
 
+        // Fresh-enough cache → no network.
+        if !force, let store = cache, let e = await store.tree(cacheKey),
+           Date().timeIntervalSince(e.checkedAt) < ttl {
+            return .ok(map: e.folderSHAs, root: e.rootSHA, ref: ref)
+        }
+
+        do {
             let prior = await cache?.tree(cacheKey)
             let tm = try await gh.folderSHAMap(repo: repo, ref: ref, etag: prior?.etag)
 
             if tm.notModified, let prior {
                 await cache?.setTree(cacheKey, .init(etag: prior.etag, folderSHAs: prior.folderSHAs,
                                                      rootSHA: prior.rootSHA, checkedAt: Date()))
-                return .ok(map: prior.folderSHAs, root: prior.rootSHA)
+                return .ok(map: prior.folderSHAs, root: prior.rootSHA, ref: ref)
             }
             await cache?.setTree(cacheKey, .init(etag: tm.etag, folderSHAs: tm.folderSHAs,
                                                  rootSHA: tm.rootSHA, checkedAt: Date()))
-            return .ok(map: tm.folderSHAs, root: tm.rootSHA)
+            return .ok(map: tm.folderSHAs, root: tm.rootSHA, ref: ref)
         } catch {
             return .failed(error.localizedDescription)
         }

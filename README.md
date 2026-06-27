@@ -10,8 +10,8 @@ Cursor, and ~20 other agents — and tells you which ones have an upstream updat
 
 - **Discovers** every skill — global, plus across all your projects — via the `skills` CLI (the
   menu-bar panel) and a recursive dev-folder scan (the dashboard).
-- **Detects updates** by comparing each skill's folder git tree-SHA against GitHub — global skills
-  from the lockfile, **project-local skills computed on disk** (so those are updatable too).
+- **Detects updates** by comparing global lock tree-SHAs against GitHub; project-local root
+  `SKILL.md` locks are checked with the same single-file hash as the `skills` CLI.
 - **Updates in one click** (`skills update`), with an "Update all".
 - **Dashboard window**: every skill across every project in a sortable, filterable table, each tagged
   **Local / Linked / Global / External** so you see at a glance whether a project's skill is its own
@@ -36,7 +36,7 @@ small JSON update-cache (so badges survive relaunch and GitHub isn't hammered).
 ## Build & run
 
 ```bash
-scripts/build-app.sh        # release build → dist/Skillui.app (ad-hoc signed)
+scripts/build-app.sh        # release build → dist/Skillui.app (Developer ID if available)
 open dist/Skillui.app
 ```
 
@@ -89,15 +89,15 @@ section, and uploads the DMG plus `.sha256` checksum to GitHub Releases. See [do
 |---------|---------|
 | Discovery | `skills list -g\|-p --json` → `[{name, path, scope, agents[]}]`. Default scope is project; Skillui queries both. |
 | Provenance | Global lock `~/.agents/.skill-lock.json` (rich, has `skillFolderHash` = git tree SHA). Project lock `<root>/skills-lock.json` (lean, `computedHash`). Joined to the list **by name**. |
-| Update check | `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`, match the entry whose path is the skill folder (`dirname(skillPath)`), compare its `sha` to the installed `skillFolderHash`. ETag-cached, 6h cadence, truncated-tree fallback. |
+| Update check | Global locks: `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`, compare the folder tree SHA to `skillFolderHash`. Project v1 root `SKILL.md` locks: fetch the upstream file and hash `SKILL.md + contents` to match the CLI's `computedHash`. |
 | Cross-agent | A skill in the shared `.agents/skills` dir belongs to many agents at once — shown as agent chips on a single row, never duplicated. |
 
 ## Limitations (MVP)
 
-- Update detection: global skills compare the lockfile's git tree-SHA; **project-local**
-  skills compute their folder's git tree-SHA on disk and compare to upstream (so they're
-  updatable too). Skills not installed from a known source still show as *untracked*.
-- First multi-project scan reads every project-local skill folder to hash it (then cached by
-  a metadata signature, so re-scans are cheap). It runs in the background; globals show first.
+- Update detection: global skills compare the lockfile's git tree-SHA; project-local root
+  `SKILL.md` skills compare the lockfile's CLI hash to the upstream file hash. More complex
+  project v1 locks do not have a reliable upstream hash, so Skillui does not show false update
+  badges for them. Skills not installed from a known source still show as *untracked*.
+- The multi-project scan runs in the background; globals show first.
 - The GitHub PAT lives in the Keychain; everything else is UserDefaults.
 - Application self-update is a GitHub Releases DMG prompt, not a silent in-place updater.

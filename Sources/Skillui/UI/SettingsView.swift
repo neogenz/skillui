@@ -61,6 +61,10 @@ struct SettingsView: View {
                 }
 
                 settingsSection("GitHub") {
+                    if app.githubCredentialNeedsAttention {
+                        caption("macOS blocked silent access to the stored token. Approve Always Allow once for the signed Skillui app, or paste the token again to replace the old dev entry.")
+                        rowDivider
+                    }
                     settingsRow("Personal access token") {
                         SecureField("", text: $app.githubPAT, prompt: Text("optional"))
                             .settingsTextField(focused: focus == .pat)
@@ -123,6 +127,7 @@ struct SettingsView: View {
         .background(Theme.traySurface)
         .frame(width: 460, height: 540)
         .task {
+            app.loadGitHubPATForEditing()
             // When opened from the rate-limit banner, focus the token field (not the first field).
             if app.requestPATFocus {
                 app.requestPATFocus = false

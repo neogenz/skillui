@@ -136,6 +136,11 @@ private func writeTempLock(_ json: String) throws -> URL {
     }
 }
 
+@Test func skillsContentHasherMatchesSingleFileProjectLock() {
+    let hash = SkillsContentHasher.singleFileHash(contents: Data("hello".utf8))
+    #expect(hash == "15ee0148f7664b9a5220aef539c3b4f54947ff5f5b5a0779ac39a90546117982")
+}
+
 // MARK: - App release version parsing
 
 @Test func appReleaseVersionParsingStripsLeadingV() {

@@ -3,6 +3,7 @@ import AppKit
 
 struct UpdateActivityView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: UUID?
     var staticIndicators = false
 
@@ -136,6 +137,10 @@ struct UpdateActivityView: View {
         return VStack(alignment: .leading, spacing: 0) {
             if let item {
                 detailHeader(item)
+                if item.status == .warning {
+                    Divider()
+                    attentionPanel()
+                }
                 Divider()
                 logPane(item)
             } else {
@@ -176,6 +181,28 @@ struct UpdateActivityView: View {
             }
         }
         .padding(14)
+    }
+
+    private func attentionPanel() -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.statusWarn)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Verification still found update rows.")
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text("The CLI command finished. Check the remaining rows in Dashboard, retry one row once, then copy this log if it stays listed.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Button("Open Dashboard") { openWindow(id: "dashboard") }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Theme.statusWarn.opacity(0.10))
     }
 
     private func logPane(_ item: UpdateActivityItem) -> some View {

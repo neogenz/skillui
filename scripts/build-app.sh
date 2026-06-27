@@ -10,6 +10,17 @@ VERSION="${SKILLUI_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVe
 BUILD="${SKILLUI_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 BUNDLE_ID="${SKILLUI_BUNDLE_ID:-com.maximedesogus.skillui}"
 RELEASE_REPO="${SKILLUI_RELEASE_REPO:-neogenz/skillui}"
+CODESIGN_IDENTITY="${SKILLUI_CODESIGN_IDENTITY:-${DEVELOPER_ID:-}}"
+if [[ -z "$CODESIGN_IDENTITY" ]]; then
+    CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' \
+        | head -n 1)"
+fi
+if [[ -z "$CODESIGN_IDENTITY" ]]; then
+    CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' \
+        | head -n 1)"
+fi
 
 cd "$ROOT"
 echo "▸ swift build -c $CONFIG"
@@ -37,8 +48,14 @@ fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APPDIR/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :SkilluiReleaseRepository $RELEASE_REPO" "$APPDIR/Contents/Info.plist"
 
-# Ad-hoc signature: sufficient for local launch + SMAppService during development.
-# Real distribution needs a Developer ID identity + notarization (see make-dmg.sh).
-codesign --force --deep --sign - "$APPDIR" >/dev/null 2>&1 || echo "  (codesign skipped)"
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+    echo "▸ codesign $APP with $CODESIGN_IDENTITY"
+    codesign --force --deep --options runtime --sign "$CODESIGN_IDENTITY" "$APPDIR" >/dev/null
+else
+    # Fallback for contributors without an Apple signing identity. This runs locally but does not
+    # provide a stable Keychain access identity across rebuilds.
+    echo "▸ codesign $APP ad-hoc"
+    codesign --force --deep --sign - "$APPDIR" >/dev/null 2>&1 || echo "  (codesign skipped)"
+fi
 
 echo "▸ built $APPDIR ($VERSION/$BUILD)"

@@ -154,15 +154,21 @@ private func tempDir() throws -> URL {
     #expect(GitTreeHasher.signature(dir) != sigBefore)         // and signature invalidates
 }
 
-@Test func projectLocalSkillIsUpdateCheckable() {
-    // computedHash-only, but a real local folder → checkable (we compute the tree SHA on disk).
-    let lock = LockEntry(source: "me/repo", skillPath: "skills/x/SKILL.md", computedHash: "deadbeef")
-    let local = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
-                      agents: ["Shared"], projectPath: "/p", lock: lock, linkType: .projectLocal)
-    #expect(local.canCheckUpdate)
-    // same lock but a symlink elsewhere → not checkable
+@Test func projectLocalRootSkillIsUpdateCheckable() {
+    // Project locks store a skills-CLI sha256, not a Git tree SHA. Root SKILL.md packages are
+    // still checkable because we can hash the upstream file exactly the way the CLI does.
+    let rootLock = LockEntry(source: "me/repo", skillPath: "SKILL.md", computedHash: "deadbeef")
+    let root = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
+                     agents: ["Shared"], projectPath: "/p", lock: rootLock, linkType: .projectLocal)
+    #expect(root.canCheckUpdate)
+
+    let nestedLock = LockEntry(source: "me/repo", skillPath: "skills/x/SKILL.md", computedHash: "deadbeef")
+    let nested = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
+                       agents: ["Shared"], projectPath: "/p", lock: nestedLock, linkType: .projectLocal)
+    #expect(!nested.canCheckUpdate)
+
     let external = Skill(name: "x", path: "/p/.agents/skills/x", scope: .project,
-                         agents: ["Shared"], projectPath: "/p", lock: lock, linkType: .linkedExternal)
+                         agents: ["Shared"], projectPath: "/p", lock: rootLock, linkType: .linkedExternal)
     #expect(!external.canCheckUpdate)
 }
 

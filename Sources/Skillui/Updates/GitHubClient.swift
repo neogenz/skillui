@@ -15,6 +15,10 @@ struct GitHubClient: Sendable {
         let truncated: Bool?
     }
     private struct RepoMeta: Decodable, Sendable { let default_branch: String? }
+    private struct ContentResponse: Decodable, Sendable {
+        let content: String?
+        let encoding: String?
+    }
 
     enum GHError: Error, LocalizedError {
         case http(Int)
@@ -74,5 +78,22 @@ struct GitHubClient: Sendable {
         for e in tree.tree ?? [] where e.type == "tree" { map[e.path] = e.sha }
         return TreeMap(folderSHAs: map, rootSHA: tree.sha, etag: newEtag,
                        notModified: false, truncated: tree.truncated == true)
+    }
+
+    func fileContents(repo: String, path: String, ref: String) async throws -> Data {
+        let encodedPath = path.split(separator: "/")
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+        var comps = URLComponents(string: "https://api.github.com/repos/\(repo)/contents/\(encodedPath)")!
+        comps.queryItems = [URLQueryItem(name: "ref", value: ref)]
+        let (data, resp) = try await URLSession.shared.data(for: makeRequest(comps.url!))
+        guard let http = resp as? HTTPURLResponse else { throw GHError.noResponse }
+        guard http.statusCode == 200 else { throw GHError.http(http.statusCode) }
+        let decoded = try JSONDecoder().decode(ContentResponse.self, from: data)
+        guard decoded.encoding == "base64",
+              let content = decoded.content else { throw GHError.noResponse }
+        let normalized = content.replacingOccurrences(of: "\n", with: "")
+        guard let bytes = Data(base64Encoded: normalized) else { throw GHError.noResponse }
+        return bytes
     }
 }

@@ -2,9 +2,9 @@ import Foundation
 import CryptoKit
 
 /// Computes the **git tree SHA-1** of a local folder, byte-for-byte compatible with what
-/// GitHub returns for that folder in a tree listing. This lets project-local skills (whose
-/// lockfile stores a sha256 content-hash, not a git tree SHA) be compared against upstream:
-/// hash the installed folder, compare to the upstream folder tree SHA.
+/// GitHub returns for that folder in a tree listing. Kept for the `--tree-sha` diagnostic hook;
+/// project v1 update checks intentionally do not use this because their `computedHash` is a
+/// skills-CLI SHA-256, not a Git tree SHA.
 ///
 /// Git object rules implemented here:
 ///   blob = sha1("blob <len>\0" + content)

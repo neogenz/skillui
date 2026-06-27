@@ -19,6 +19,8 @@ final class AppState {
     var lastCheckedAt: Date?
     /// Set by the rate-limit banner so Settings focuses the PAT field on open.
     var requestPATFocus = false
+    /// True when a token exists but macOS refused non-interactive Keychain access.
+    var githubCredentialNeedsAttention = false
 
     // Application self-update (GitHub Releases DMG)
     var appUpdateResult: AppUpdateResult?
@@ -75,7 +77,10 @@ final class AppState {
     }
     /// GitHub PAT — stored in the Keychain, never UserDefaults.
     var githubPAT: String {
-        didSet { Keychain.setToken(githubPAT.isEmpty ? nil : githubPAT) }
+        didSet {
+            guard !isLoadingGitHubPAT else { return }
+            Keychain.setToken(githubPAT.isEmpty ? nil : githubPAT)
+        }
     }
     /// Launch-at-login, reflected straight from SMAppService.
     var launchAtLogin: Bool {
@@ -96,10 +101,19 @@ final class AppState {
     private var cachedInvocation: [String]?
     private let cacheStore = UpdateCacheStore()
     private var refreshTask: Task<Void, Never>?
+    private var isLoadingGitHubPAT = false
     private static let maxActivityLogCharacters = 200_000
+    private static let githubCredentialAttentionMessage = "GitHub token needs one-time Keychain approval in Settings."
     /// Serial chain: refresh / updateSkill / updateAll run one at a time (never interleave
     /// at await points), so spinners, statuses and the rate limit stay consistent.
     private var tail: Task<Void, Never> = Task {}
+
+    private enum GitHubCredential {
+        /// `nil` is a deliberate unauthenticated GitHub request because no token is configured.
+        case usable(String?)
+        /// A token appears to exist, but macOS refused non-interactive access to it.
+        case needsAttention(String)
+    }
 
     private func serialize(_ op: @escaping @MainActor () async -> Void) async {
         let prev = tail
@@ -117,7 +131,44 @@ final class AppState {
         return skills.filter { !$0.agents.allSatisfy(hiddenAgents.contains) }
     }
 
-    private func githubToken() -> String? { githubPAT.isEmpty ? nil : githubPAT }
+    private func githubCredential() -> GitHubCredential {
+        if !githubPAT.isEmpty {
+            githubCredentialNeedsAttention = false
+            return .usable(githubPAT)
+        }
+        switch Keychain.readToken(allowInteraction: false) {
+        case .success(let token):
+            githubCredentialNeedsAttention = false
+            return .usable(token)
+        case .notFound:
+            githubCredentialNeedsAttention = false
+            return .usable(nil)
+        case .interactionRequired, .failed:
+            githubCredentialNeedsAttention = true
+            return .needsAttention(Self.githubCredentialAttentionMessage)
+        }
+    }
+
+    private func markGitHubCredentialAttention(_ candidates: [Skill]) {
+        for s in candidates where s.canCheckUpdate {
+            statuses[s.id] = .failed(Self.githubCredentialAttentionMessage)
+        }
+    }
+
+    func loadGitHubPATForEditing() {
+        guard githubPAT.isEmpty else { return }
+        switch Keychain.readToken(allowInteraction: true) {
+        case .success(let token):
+            githubCredentialNeedsAttention = false
+            isLoadingGitHubPAT = true
+            githubPAT = token
+            isLoadingGitHubPAT = false
+        case .notFound:
+            githubCredentialNeedsAttention = false
+        case .interactionRequired, .failed:
+            githubCredentialNeedsAttention = true
+        }
+    }
 
     var currentAppVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -158,7 +209,7 @@ final class AppState {
         let headless = CommandLine.arguments.contains { a in
             a.hasPrefix("--render") || a.hasPrefix("--scan") || a.hasPrefix("--login")
         }
-        githubPAT = headless ? "" : (Keychain.token() ?? "")
+        githubPAT = ""
         if !headless { startBackgroundRefresh() }
     }
 
@@ -179,7 +230,18 @@ final class AppState {
         }
         defer { isCheckingAppUpdate = false }
 
-        let checker = AppReleaseChecker(repository: releaseRepository, token: githubToken())
+        let token: String?
+        switch githubCredential() {
+        case .usable(let resolvedToken):
+            token = resolvedToken
+        case .needsAttention(let message):
+            if manual {
+                appUpdateResult = .failed(message)
+                presentAppUpdateWindow()
+            }
+            return
+        }
+        let checker = AppReleaseChecker(repository: releaseRepository, token: token)
         do {
             if let release = try await checker.latestUpdate(currentVersion: currentAppVersion) {
                 appUpdateResult = .available(release)
@@ -313,17 +375,39 @@ final class AppState {
         return parts.joined(separator: " · ")
     }
 
-    private func remainingUpdatableCount(in targets: [Skill]) -> Int {
-        targets.reduce(into: 0) { count, skill in
-            if effectiveStatus(for: skill) == .updateAvailable { count += 1 }
-        }
+    private func remainingUpdatableSkills(in targets: [Skill]) -> [Skill] {
+        targets.filter { effectiveStatus(for: $0) == .updateAvailable }
     }
 
     private func finishRecheckActivity(_ id: UUID, targets: [Skill]) {
-        let remaining = remainingUpdatableCount(in: targets)
-        if remaining > 0 {
+        let remaining = remainingUpdatableSkills(in: targets)
+        if !remaining.isEmpty {
+            let rows = remaining
+                .sorted {
+                    ($0.projectLabel ?? "", $0.name)
+                        < ($1.projectLabel ?? "", $1.name)
+                }
+                .map { skill in
+                    let location = skill.projectLabel ?? skill.source ?? skill.scope.label
+                    return "- \(skill.name) (\(location))"
+                }
+                .joined(separator: "\n")
             markActivityItem(id, status: .warning,
-                             message: "\(remaining) skill\(remaining == 1 ? "" : "s") still differ from upstream after recheck.")
+                             message: """
+                             \(remaining.count) skill\(remaining.count == 1 ? "" : "s") still differ from upstream after recheck:
+                             \(rows)
+
+                             The update command finished, then Skillui ran a fresh verification pass and these rows still compare as outdated.
+
+                             Next step: open the Dashboard's Updates view and retry one listed row. If it remains listed after one retry, copy this log; that usually points to a lock/source mismatch in the skills CLI rather than a failed Skillui update.
+                             """)
+        } else if targets.contains(where: { $0.scope == .project && !$0.canCheckUpdate }) {
+            markActivityItem(id, status: .succeeded,
+                             message: """
+                             Update status refreshed.
+
+                             Some project-scope skills use the v1 project lock format without a reliable upstream hash. Skillui does not keep those rows in Updates after the CLI update completes, because comparing them to a Git tree can produce permanent false positives.
+                             """)
         } else {
             markActivityItem(id, status: .succeeded, message: "Update status refreshed.")
         }
@@ -419,12 +503,21 @@ final class AppState {
             Self.computeWorktreeGaps(projects: projects, installed: found)
         }.value
 
-        // Evaluate update status for comparable project skills (project-local via local git
-        // tree SHA, grouped per repo). Linked-global skills are mapped via effectiveStatus.
-        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        // Evaluate update status for comparable project skills. Project v1 locks are only
+        // checked when their hash can be compared to the upstream root SKILL.md exactly.
+        for s in projectScanSkills where !s.canCheckUpdate { statuses[s.id] = .unsupported }
         let comparable = projectScanSkills.filter { $0.canCheckUpdate }
         if !comparable.isEmpty {
             for s in comparable where statuses[s.id] != .updateAvailable { statuses[s.id] = .checking }
+            let token: String?
+            switch githubCredential() {
+            case .usable(let resolvedToken):
+                token = resolvedToken
+            case .needsAttention:
+                markGitHubCredentialAttention(comparable)
+                return
+            }
+            let checker = UpdateChecker(token: token, cache: cacheStore)
             let results = await checker.evaluate(comparable, force: force)
             for (id, st) in results { statuses[id] = st }
         }
@@ -593,9 +686,18 @@ final class AppState {
     /// `isScanningProjects` single-flight guard can silently drop a forced run while a
     /// background refresh / Rescan is mid-walk, leaving the just-updated badge stale.
     private func reevaluateProjectStatuses(_ candidates: [Skill]) async {
+        for s in candidates where s.scope == .project && !s.canCheckUpdate { statuses[s.id] = .unsupported }
         let checkable = candidates.filter { $0.scope == .project && $0.canCheckUpdate }
         guard !checkable.isEmpty else { return }
-        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        let token: String?
+        switch githubCredential() {
+        case .usable(let resolvedToken):
+            token = resolvedToken
+        case .needsAttention:
+            markGitHubCredentialAttention(checkable)
+            return
+        }
+        let checker = UpdateChecker(token: token, cache: cacheStore)
         let results = await checker.evaluate(checkable, force: true)
         for (id, st) in results { statuses[id] = st }
     }
@@ -689,7 +791,15 @@ final class AppState {
         let checkable = skills.filter { $0.canCheckUpdate }
         for s in checkable where statuses[s.id] != .updateAvailable { statuses[s.id] = .checking }
 
-        let checker = UpdateChecker(token: githubToken(), cache: cacheStore)
+        let token: String?
+        switch githubCredential() {
+        case .usable(let resolvedToken):
+            token = resolvedToken
+        case .needsAttention:
+            markGitHubCredentialAttention(checkable)
+            return
+        }
+        let checker = UpdateChecker(token: token, cache: cacheStore)
         let results = await checker.evaluate(checkable, force: force)
         for (id, status) in results { statuses[id] = status }
     }

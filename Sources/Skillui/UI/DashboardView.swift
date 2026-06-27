@@ -85,6 +85,18 @@ struct DashboardView: View {
         .background(Theme.statusWarn.opacity(0.12))
     }
 
+    private var keychainBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "key.fill").foregroundStyle(Theme.statusWarn)
+            Text("GitHub token needs one-time Keychain approval. Open Settings and choose Always Allow when macOS asks.")
+                .font(.system(size: 11))
+            Spacer()
+            Button("Open Settings") { app.requestPATFocus = true; openSettings() }.controlSize(.small)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Theme.statusWarn.opacity(0.12))
+    }
+
     /// Offers to hydrate worktrees whose lockfile lists skills that never got installed.
     private var gapBanner: some View {
         HStack(spacing: 8) {
@@ -193,6 +205,7 @@ struct DashboardView: View {
     private var detailPane: some View {
         VStack(spacing: 0) {
             if !app.worktreeGaps.isEmpty { gapBanner }
+            if app.githubCredentialNeedsAttention { keychainBanner }
             if app.isRateLimited && app.githubPAT.isEmpty { rateLimitBanner }
             table
         }

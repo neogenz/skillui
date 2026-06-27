@@ -43,12 +43,13 @@ These exit before the GUI starts (see `System/DebugCLI.swift`, `System/RenderCLI
   scan root; `FilesystemScanner` enumerates each project's skill dirs; `LinkClassifier` stats them
   for symlink info the CLI doesn't expose; `GitInfo` detects git worktrees.
 
-`Updates/` compares folder tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`)
+`Updates/` compares global lock tree SHAs against GitHub and checks project root `SKILL.md`
+locks with the `skills` CLI single-file hash. `System/AppState.swift` (`@MainActor @Observable`)
 coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `DashboardView` (window).
 `App/SkilluiApp.swift` = `@main` with MenuBarExtra + Settings + Dashboard `Window` scenes.
 
 - The only persisted state besides UserDefaults/Keychain is
-  `~/Library/Application Support/Skillui/update-cache.json` (per-repo tree SHAs/ETags + local-tree cache).
+  `~/Library/Application Support/Skillui/update-cache.json` (per-repo tree SHAs/ETags + default branches).
 - App self-update is GitHub Releases based: `AppReleaseChecker` reads `/releases/latest`, the UI shows
   release notes in `AppUpdateView`, then downloads/opens the DMG. Do not add Sparkle unless the
   system-framework-only constraint is explicitly changed.
@@ -61,8 +62,9 @@ coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `Da
   cross-project signal.
 - **Worktrees**: `GitInfo` reads `.git` — a *file* (`gitdir: …/.git/worktrees/<name>`) means a worktree;
   shown as `mainRepo › worktree` and grouped/filterable under the main repo.
-- **Update status per kind**: global → stored `skillFolderHash`; project-local → local git tree SHA
-  (`GitTreeHasher`) vs upstream; linked-global → mapped to its global counterpart; external/untracked → none.
+- **Update status per kind**: global → stored `skillFolderHash` vs upstream tree SHA; project-local
+  root `SKILL.md` → `computedHash` vs upstream single-file hash; linked-global → mapped to its
+  global counterpart; complex project v1 / external / untracked → none.
 - **Privacy (critical)**: the recursive scan defaults to dev roots (`AppState.defaultDevRoots()`:
   `~/workspace`, `~/Developer`, `~/code`, …), NOT the whole home, and `ProjectFinder.skip` hard-excludes
   macOS TCC-protected/personal dirs (Documents, Desktop, Downloads, Music, Pictures, Movies, Library) so
@@ -79,16 +81,18 @@ coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `Da
   lean: `computedHash` (sha256, NOT a tree SHA). Both are **keyed maps by skill name**. Join to the
   list by name. (XDG override: `$XDG_STATE_HOME/skills/.skill-lock.json` — matches the CLI source.)
 - `skillPath` points at **SKILL.md**; the repo folder is its parent (`""` = repo root).
-- Update detection: `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`, match the entry whose
-  `path` == the skill folder & `type == "tree"`, compare its `sha` to the installed git tree SHA.
-  Lockfiles usually omit `ref` → resolve the default branch. **Global** skills use the stored
-  `skillFolderHash`; **project-local** skills (lock has only a sha256 `computedHash`) compute the
-  folder's git tree SHA on disk via `GitTreeHasher` (CryptoKit SHA-1, byte-compatible with git;
-  signature-cached so re-scans skip unchanged folders). Linked-global project skills map to their
-  global counterpart; untracked / external-symlink skills aren't checkable.
+- Update detection: **Global** skills use `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`,
+  match the entry whose `path` == the skill folder & `type == "tree"`, and compare its `sha` to
+  stored `skillFolderHash`. Lockfiles usually omit `ref` → resolve the default branch.
+  **Project v1 root `SKILL.md`** skills fetch the upstream file and compare `computedHash` to the
+  CLI-compatible `sha256("SKILL.md" + contents)`. Do **not** compare project `computedHash` to a
+  Git tree SHA: root repos include non-installed files and symlinked/expanded folders can produce
+  permanent false positives. Complex project v1 skills without `skillFolderHash` are unsupported
+  for update checks unless the lock schema gets richer.
 - skills.sh page URL is `https://skills.sh/{source}` (NOT `/skills/{source}`). GitHub repo =
   `sourceUrl` minus `.git`.
-- Never run `skills update` to *check* — it mutates. Detection is GitHub-tree-SHA only.
+- Never run `skills update` to *check* — it mutates. Even `skills update --help` mutates with
+  skills@1.5.13, so help text must not be probed through the update subcommand.
 
 ## Conventions
 
@@ -112,8 +116,8 @@ coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `Da
   all its skill folders) + ETag + 6h TTL; keep it that way. Many project repos still blow 60/hr → a
   PAT (5000/hr) is needed; rate-limit (403) is surfaced as a dashboard banner (`AppState.isRateLimited`)
   with an "Add token" button that opens Settings focused on the PAT field.
-- First multi-project scan reads every project-local folder to hash it (then cached by a metadata
-  signature). Runs in the background — globals/panel show first; `.checking` shows while it computes.
+- Recursive project scans run in the background — globals/panel show first; `.checking` shows while
+  comparable project roots are evaluated.
 - The app works fully offline except update badges (only GitHub must be reachable).
 - Public releases need Developer ID signing + notarization. In CI use
   `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `NOTARY_APPLE_ID`, `NOTARY_APP_PASSWORD`,

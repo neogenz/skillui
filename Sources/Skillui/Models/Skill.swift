@@ -8,7 +8,7 @@ import Foundation
 ///     `skillFolderHash` is a 40-hex git *tree* SHA → usable for update detection.
 ///   - PROJECT lock `<root>/skills-lock.json` (version 1) is leaner:
 ///     `source, sourceType, skillPath, computedHash` (a sha256 of folder contents).
-///     No git tree SHA → cannot be tree-SHA-compared; update check degrades.
+///     No git tree SHA → only root `SKILL.md` packages are safely comparable.
 ///   - Neither stores `ref` reliably → resolve the repo default branch at check time.
 ///   - `skillPath` points at the SKILL.md file, so the repo *folder* is its parent dir.
 struct LockEntry: Sendable, Equatable {
@@ -62,12 +62,14 @@ struct Skill: Identifiable, Sendable, Equatable {
     var isTracked: Bool { lock?.source != nil }
 
     /// True when update detection is possible: a global skill with a stored git tree SHA, or a
-    /// project-local real folder (whose git tree SHA we compute locally), as long as we know the
-    /// source repo + path.
+    /// project-local root `SKILL.md` lock whose upstream single-file hash can be computed exactly.
     var canCheckUpdate: Bool {
         guard lock?.source != nil, lock?.skillPath != nil else { return false }
         if lock?.skillFolderHash != nil { return true }   // global: has a git tree SHA
-        return linkType == .projectLocal                   // project-local: compute from disk
+        guard linkType == .projectLocal,
+              lock?.computedHash != nil,
+              repoFolder == "" else { return false }
+        return true
     }
 
     /// Repo folder containing the skill — parent of `skillPath` (which points to SKILL.md).
