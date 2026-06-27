@@ -178,16 +178,17 @@ struct DashboardView: View {
             .searchable(text: $search, placement: .toolbar, prompt: "Filter")
             .toolbar {
                 ToolbarItem(placement: .navigation) {
+                    // One control that shows its own progress — a bare ProgressView as a second
+                    // toolbar item gets its own awkwardly-padded glass capsule on macOS 26.
                     Button { Task { await app.rescanProjects() } } label: {
-                        Label("Rescan", systemImage: "arrow.clockwise")
+                        if app.isScanningProjects {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Rescan", systemImage: "arrow.clockwise")
+                        }
                     }
                     .disabled(app.isScanningProjects)
                     .help("Rescan \(rootLabel)")
-                }
-                if app.isScanningProjects {
-                    ToolbarItem(placement: .navigation) {
-                        ProgressView().controlSize(.small)
-                    }
                 }
                 if !updatableRows.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
