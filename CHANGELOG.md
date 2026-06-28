@@ -4,6 +4,34 @@ All notable changes to Skillui are documented here. Keep the newest release firs
 
 ## Unreleased
 
+## v0.1.0-beta.2
+
+Maintenance beta from a full code audit: correctness, performance, accessibility, and
+release-pipeline fixes. No new features.
+
+### Fixed
+
+- Dashboard project-local update badges no longer blank out after updating a global skill
+  (a status map shared with the dashboard was being over-pruned).
+- The menu-bar app now tracks its Dock icon correctly across the Dashboard, Software Update,
+  and Update Activity windows — it no longer lingers after the last window closes, nor vanishes
+  while another window is still open.
+- Release packaging fails loudly if notarization fails instead of silently shipping an
+  un-notarized DMG, and now staples the ticket to the app as well as the DMG, so an app copied
+  out of the DMG still verifies offline.
+
+### Changed
+
+- Faster Dashboard and menu-bar rendering: the skill list is filtered, sorted, and grouped once
+  per refresh instead of several times per redraw.
+- A cancelled scan now stops its `npx`/`skills` child process immediately instead of leaving it
+  running until a timeout.
+- Concurrent update checks of the same repository share a single GitHub request, and the update
+  cache is written once per check instead of after every entry.
+- Settings controls now carry proper accessibility labels.
+- Internal: dropped the deprecated `codesign --deep`; the local release preflight validates the
+  changelog the same way the CI release workflow does.
+
 ## v0.1.0-beta.1
 
 First public beta of Skillui: a glanceable menu-bar panel plus a full dashboard that give one
