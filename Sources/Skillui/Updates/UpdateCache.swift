@@ -23,6 +23,20 @@ struct UpdateCache: Codable, Sendable {
 actor UpdateCacheStore {
     private var cache: UpdateCache
     private let url: URL
+    /// Pending mutations not yet written. The cache is persisted once per batch via `flush()` instead
+    /// of on every `setTree`/`setBranch` — a many-repo sweep used to re-serialize the whole growing
+    /// cache N times (~O(N²) encode work) because every set called `save()`.
+    private var dirty = false
+    /// In-flight tree fetches keyed by cacheKey, so concurrent callers (e.g. the panel's global check
+    /// and the dashboard's project check hitting the SAME repo with no stored ref) share ONE network
+    /// request instead of each spending a slot of GitHub's 60 req/hr ceiling.
+    private var inFlight: [String: Task<TreeFetch, Never>] = [:]
+
+    /// Outcome of a coalesced tree fetch. Sendable so it can cross the actor boundary.
+    enum TreeFetch: Sendable {
+        case entry(UpdateCache.TreeEntry)
+        case failure(String)
+    }
 
     init() {
         let fm = FileManager.default
@@ -45,12 +59,35 @@ actor UpdateCacheStore {
     }
 
     func tree(_ key: String) -> UpdateCache.TreeEntry? { cache.trees[key] }
-    func setTree(_ key: String, _ entry: UpdateCache.TreeEntry) { cache.trees[key] = entry; save() }
+    func setTree(_ key: String, _ entry: UpdateCache.TreeEntry) { cache.trees[key] = entry; dirty = true }
 
     func branch(_ repo: String) -> String? { cache.branches[repo] }
-    func setBranch(_ repo: String, _ branch: String) { cache.branches[repo] = branch; save() }
+    func setBranch(_ repo: String, _ branch: String) { cache.branches[repo] = branch; dirty = true }
 
-    private func save() {
+    /// Single-flight tree resolution. A fresh (within `ttl`) cache hit returns immediately without a
+    /// network call; otherwise concurrent callers for the same `key` join ONE shared `fetch`. Only a
+    /// successful `.entry` is cached + marked dirty (a `.failure` is never cached). `fetch` receives the
+    /// prior cached entry so it can pass its ETag for a conditional request.
+    func resolveTree(key: String, ttl: TimeInterval, force: Bool,
+                     fetch: @Sendable @escaping (_ prior: UpdateCache.TreeEntry?) async -> TreeFetch) async -> TreeFetch {
+        if !force, let e = cache.trees[key], Date().timeIntervalSince(e.checkedAt) < ttl {
+            return .entry(e)
+        }
+        if let existing = inFlight[key] { return await existing.value }   // join the in-flight fetch
+        let prior = cache.trees[key]
+        let task = Task { await fetch(prior) }
+        inFlight[key] = task
+        let result = await task.value
+        inFlight[key] = nil
+        if case .entry(let e) = result { cache.trees[key] = e; dirty = true }
+        return result
+    }
+
+    /// Persist pending mutations once. Called at the end of a batch (UpdateChecker.evaluate) so a
+    /// sweep performs a single encode + atomic write instead of one per entry.
+    func flush() {
+        guard dirty else { return }
+        dirty = false
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601

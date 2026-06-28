@@ -71,24 +71,27 @@ private struct MenuBarLabel: View {
         Image(systemName: "puzzlepiece.extension.fill")
         if count > 0 { Text("\(count)") }
         Color.clear.frame(width: 0, height: 0)
+            // Open the window — its own .onAppear flips activation to .regular via AppState's
+            // refcount (so .accessory is restored only when the LAST regular window closes, no
+            // per-scene races). Still activate here: re-triggering an already-open window won't
+            // refire onAppear, so this is what foregrounds it (e.g. a background update bumps the
+            // revision while the window sits behind another app). Double-activate on first open is
+            // harmless and leaves the refcount untouched.
             .onAppear {
                 app.scheduleInitialAppUpdateCheck()
                 if CommandLine.arguments.contains("--dashboard") {
-                    NSApplication.shared.setActivationPolicy(.regular)
                     openWindow(id: "dashboard")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
             }
             .onChange(of: app.appUpdateWindowRevision) {
                 if app.appUpdateWindowRevision > 0 {
-                    NSApplication.shared.setActivationPolicy(.regular)
                     openWindow(id: "app-update")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
             }
             .onChange(of: app.updateActivityWindowRevision) {
                 if app.updateActivityWindowRevision > 0 {
-                    NSApplication.shared.setActivationPolicy(.regular)
                     openWindow(id: "update-activity")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }

@@ -41,6 +41,7 @@ struct UpdateChecker: Sendable {
             for _ in 0..<min(maxConcurrent, groupList.count) { pump() }
             for await part in tg { out.merge(part) { _, new in new }; pump() }
         }
+        await cache?.flush()   // persist all entries gathered this sweep in a single write
         return out
     }
 
@@ -101,26 +102,31 @@ struct UpdateChecker: Sendable {
             }
         }
 
-        // Fresh-enough cache → no network.
-        if !force, let store = cache, let e = await store.tree(cacheKey),
-           Date().timeIntervalSince(e.checkedAt) < ttl {
-            return .ok(map: e.folderSHAs, root: e.rootSHA, ref: ref)
+        // One network fetch per (repo, ref), reusing a prior ETag for a conditional request. Routed
+        // through the store's single-flight so two concurrent scans of the same repo share one call.
+        @Sendable func fetch(_ prior: UpdateCache.TreeEntry?) async -> UpdateCacheStore.TreeFetch {
+            do {
+                let tm = try await gh.folderSHAMap(repo: repo, ref: ref, etag: prior?.etag)
+                if tm.notModified, let prior {
+                    return .entry(.init(etag: prior.etag, folderSHAs: prior.folderSHAs,
+                                        rootSHA: prior.rootSHA, checkedAt: Date()))
+                }
+                return .entry(.init(etag: tm.etag, folderSHAs: tm.folderSHAs,
+                                    rootSHA: tm.rootSHA, checkedAt: Date()))
+            } catch {
+                return .failure(error.localizedDescription)
+            }
         }
 
-        do {
-            let prior = await cache?.tree(cacheKey)
-            let tm = try await gh.folderSHAMap(repo: repo, ref: ref, etag: prior?.etag)
-
-            if tm.notModified, let prior {
-                await cache?.setTree(cacheKey, .init(etag: prior.etag, folderSHAs: prior.folderSHAs,
-                                                     rootSHA: prior.rootSHA, checkedAt: Date()))
-                return .ok(map: prior.folderSHAs, root: prior.rootSHA, ref: ref)
-            }
-            await cache?.setTree(cacheKey, .init(etag: tm.etag, folderSHAs: tm.folderSHAs,
-                                                 rootSHA: tm.rootSHA, checkedAt: Date()))
-            return .ok(map: tm.folderSHAs, root: tm.rootSHA, ref: ref)
-        } catch {
-            return .failed(error.localizedDescription)
+        let outcome: UpdateCacheStore.TreeFetch
+        if let store = cache {
+            outcome = await store.resolveTree(key: cacheKey, ttl: ttl, force: force, fetch: fetch)
+        } else {
+            outcome = await fetch(nil)   // no shared cache (e.g. tests): direct fetch, no coalescing
+        }
+        switch outcome {
+        case .entry(let e): return .ok(map: e.folderSHAs, root: e.rootSHA, ref: ref)
+        case .failure(let msg): return .failed(msg)
         }
     }
 }

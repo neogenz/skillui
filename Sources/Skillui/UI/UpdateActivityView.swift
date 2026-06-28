@@ -18,7 +18,12 @@ struct UpdateActivityView: View {
             }
         }
         .background(Theme.traySurface)
-        .onAppear { selectDefaultItem() }
+        .onAppear {
+            selectDefaultItem()
+            // staticIndicators marks the headless PNG-render path (RenderCLI) — don't touch activation there.
+            if !staticIndicators { app.enterRegularActivation() }
+        }
+        .onDisappear { if !staticIndicators { app.leaveRegularActivation() } }
         .onChange(of: app.updateActivity?.id) { selectDefaultItem() }
         .onChange(of: app.updateActivity?.items.count) { selectDefaultItem(onlyIfNil: true) }
     }
@@ -78,13 +83,16 @@ struct UpdateActivityView: View {
     }
 
     private func timeline(_ activity: UpdateActivitySession) -> some View {
-        ScrollView {
+        // Resolve the selected item once, not per row: selectedItemID scans the items list, so
+        // computing it inside the ForEach made the timeline build O(n²) in the number of steps.
+        let currentID = selectedItemID(activity)
+        return ScrollView {
             LazyVStack(spacing: 4) {
                 ForEach(activity.items) { item in
                     Button {
                         selection = item.id
                     } label: {
-                        activityRow(item, selected: item.id == selectedItemID(activity))
+                        activityRow(item, selected: item.id == currentID)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(item.title)
