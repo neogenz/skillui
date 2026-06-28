@@ -98,7 +98,10 @@ struct PanelView: View {
     }
 
     private var listBody: some View {
-        VStack(spacing: Theme.Spacing.xl) {
+        // Derive once per body: `updatable` was otherwise recomputed for the lead group AND again
+        // inside `sections` (which excludes it), each pass re-filtering app.visibleSkills.
+        let updatable = self.updatable
+        return VStack(spacing: Theme.Spacing.xl) {
             // The one thing worth your attention leads. When there's nothing to do, a calm
             // affirmation takes its place instead of making you scan the list to be sure.
             if !updatable.isEmpty {
@@ -106,7 +109,7 @@ struct PanelView: View {
             } else if hasTracked {
                 CaughtUpBanner()
             }
-            ForEach(sections) { sec in
+            ForEach(sections(excluding: updatable)) { sec in
                 SectionView(scope: sec.scope, tracked: sec.tracked, untracked: sec.untracked)
             }
         }
@@ -182,7 +185,7 @@ struct PanelView: View {
 
     private var hasTracked: Bool { app.visibleSkills.contains { $0.isTracked } }
 
-    private var sections: [PanelSection] {
+    private func sections(excluding updatable: [Skill]) -> [PanelSection] {
         let updatableIDs = Set(updatable.map(\.id))
         return Scope.allCases.compactMap { scope in
             let inScope = app.visibleSkills.filter { $0.scope == scope && !updatableIDs.contains($0.id) }
@@ -225,7 +228,7 @@ private struct UpdatesSection: View {
             .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-                ForEach(Array(skills.enumerated()), id: \.element.id) { i, s in
+                ForEach(skills.enumerated(), id: \.element.id) { i, s in
                     SkillRowView(skill: s, status: .updateAvailable)
                     if i < skills.count - 1 { Divider().padding(.leading, 12) }
                 }
@@ -265,7 +268,7 @@ private struct SectionView: View {
                 .foregroundStyle(.secondary).padding(.horizontal, 4)
 
             VStack(spacing: 0) {
-                ForEach(Array(tracked.enumerated()), id: \.element.id) { i, s in
+                ForEach(tracked.enumerated(), id: \.element.id) { i, s in
                     SkillRowView(skill: s, status: app.statuses[s.id] ?? .unknown)
                     if i < tracked.count - 1 || !untracked.isEmpty {
                         Divider().padding(.leading, 12)
@@ -274,7 +277,7 @@ private struct SectionView: View {
                 if !untracked.isEmpty {
                     DisclosureGroup(isExpanded: $showUntracked) {
                         VStack(spacing: 0) {
-                            ForEach(Array(untracked.enumerated()), id: \.element.id) { i, s in
+                            ForEach(untracked.enumerated(), id: \.element.id) { i, s in
                                 SkillRowView(skill: s, status: .unsupported)
                                 if i < untracked.count - 1 { Divider().padding(.leading, 12) }
                             }

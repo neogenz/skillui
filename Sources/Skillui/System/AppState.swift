@@ -124,6 +124,27 @@ final class AppState {
         await t.value
     }
 
+    // MARK: Activation policy (Dock + app-switcher presence)
+    // At rest the app is a menu-bar agent (.accessory). The Dashboard / Software Update / Update
+    // Activity windows each need .regular so they pick up a Dock icon. Letting every scene flip the
+    // policy on its own raced: closing one window demoted the whole app while another was still open,
+    // and the Update Activity window never restored .accessory at all (leaving a stuck Dock icon).
+    // Refcount the open "regular" windows instead — go .regular on 0→1, back to .accessory on 1→0.
+    @ObservationIgnored private var regularWindowCount = 0
+
+    /// Call from a regular window's `.onAppear`: bumps the refcount and ensures the app is foregrounded.
+    func enterRegularActivation() {
+        regularWindowCount += 1
+        if regularWindowCount == 1 { NSApp.setActivationPolicy(.regular) }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Call from a regular window's `.onDisappear`: only the last window standing demotes to .accessory.
+    func leaveRegularActivation() {
+        regularWindowCount = max(0, regularWindowCount - 1)
+        if regularWindowCount == 0 { NSApp.setActivationPolicy(.accessory) }
+    }
+
     /// All agent display names across discovered skills (for the Settings filter list).
     var allAgents: [String] { Array(Set(skills.flatMap(\.agents))).sorted() }
 
@@ -515,8 +536,10 @@ final class AppState {
         skills = outcome.skills.sorted(by: Self.order)
         lastError = outcome.error
 
-        // Prune statuses for skills that disappeared.
-        let liveIDs = Set(skills.map(\.id))
+        // Prune statuses for skills that disappeared. `statuses` is SHARED with the dashboard's
+        // project scan, so prune on the union of both surfaces — keying on `skills` alone would
+        // delete every project-scan status (scanProjects uses this same union at its own prune).
+        let liveIDs = Set((skills + projectScanSkills).map(\.id))
         statuses = statuses.filter { liveIDs.contains($0.key) }
         hasScannedOnce = true
     }
@@ -528,8 +551,10 @@ final class AppState {
             await self.checkUpdates(force: force)
             self.lastCheckedAt = Date()
         }
-        // Project scan is NOT in the serial block: it touches disjoint state, so globals
-        // appear immediately while the (slower) recursive walk runs in the background.
+        // Project scan is NOT in the serial block so globals appear immediately while the (slower)
+        // recursive walk runs in the background. It writes the SAME shared `statuses`/`skills`-adjacent
+        // state, but only the disjoint project half of `statuses` — and scan()'s prune now keeps that
+        // half intact (union prune above), so the two paths no longer clobber each other.
         if autoScanProjects { await scanProjects() }
     }
 

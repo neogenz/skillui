@@ -16,14 +16,14 @@ struct AppUpdateView: View {
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 360, idealHeight: 460)
         .background(Theme.traySurface)
-        .onAppear {
-            if activateOnAppear {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-        .onDisappear { if activateOnAppear { NSApp.setActivationPolicy(.accessory) } }
+        .onAppear { if activateOnAppear { app.enterRegularActivation() } }
+        .onDisappear { if activateOnAppear { app.leaveRegularActivation() } }
     }
+
+    /// Decoded once, not on every body re-evaluation (the view rebuilds on each app-update state
+    /// transition / download toggle).
+    private static let cachedAppIcon: NSImage? =
+        Bundle.main.url(forResource: "AppIcon", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -38,8 +38,7 @@ struct AppUpdateView: View {
     }
 
     @ViewBuilder private var appIcon: some View {
-        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-           let image = NSImage(contentsOf: url) {
+        if let image = Self.cachedAppIcon {
             Image(nsImage: image)
                 .resizable()
                 .frame(width: 46, height: 46)

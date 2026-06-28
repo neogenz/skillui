@@ -50,12 +50,12 @@ fi
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
     echo "▸ codesign $APP with $CODESIGN_IDENTITY"
-    codesign --force --deep --options runtime --sign "$CODESIGN_IDENTITY" "$APPDIR" >/dev/null
+    codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$APPDIR" >/dev/null
 else
     # Fallback for contributors without an Apple signing identity. This runs locally but does not
     # provide a stable Keychain access identity across rebuilds.
     echo "▸ codesign $APP ad-hoc"
-    codesign --force --deep --sign - "$APPDIR" >/dev/null 2>&1 || echo "  (codesign skipped)"
+    codesign --force --sign - "$APPDIR" >/dev/null 2>&1 || echo "  (codesign skipped)"
 fi
 
 echo "▸ built $APPDIR ($VERSION/$BUILD)"

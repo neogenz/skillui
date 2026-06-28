@@ -13,8 +13,18 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 TAG="v$VERSION"
-grep -q "## $TAG" CHANGELOG.md || {
-    echo "CHANGELOG.md is missing a '$TAG' section." >&2
+# Validate the changelog with the SAME extraction the release workflow uses (release.yml):
+# an EXACT-line header match plus a non-empty body. A loose `grep "## $TAG"` substring check would
+# pass here yet let CI's awk extract zero notes and hard-fail — so mirror CI byte-for-byte.
+NOTES_FILE="$(mktemp)"
+trap 'rm -f "$NOTES_FILE"' EXIT
+awk -v tag="## $TAG" '
+    $0 == tag { capture=1; next }
+    capture && /^## v/ { exit }
+    capture { print }
+' CHANGELOG.md > "$NOTES_FILE"
+[[ -s "$NOTES_FILE" ]] || {
+    echo "CHANGELOG.md has no release notes for '$TAG' (exact header line '## $TAG' required, matching release.yml)." >&2
     exit 1
 }
 

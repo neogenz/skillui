@@ -16,12 +16,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 settingsSection("General") {
                     settingsRow("Launch at login") {
-                        Toggle("", isOn: $app.launchAtLogin)
+                        Toggle("Launch at login", isOn: $app.launchAtLogin)
                             .labelsHidden()
                     }
                     rowDivider
                     settingsRow("Check for updates") {
-                        Picker("", selection: $app.refreshIntervalHours) {
+                        Picker("Check for updates", selection: $app.refreshIntervalHours) {
                             Text("Every hour").tag(1.0)
                             Text("Every 3 hours").tag(3.0)
                             Text("Every 6 hours").tag(6.0)
@@ -57,6 +57,7 @@ struct SettingsView: View {
                         TextField("", text: $app.cliPathOverride, prompt: Text("auto-detect"))
                             .settingsTextField(focused: focus == .cliPath)
                             .focused($focus, equals: .cliPath)
+                            .accessibilityLabel("npx / skills path")
                     }
                     rowDivider
                     caption("Leave empty to resolve `skills` or `npx` from your login shell.")
@@ -77,6 +78,7 @@ struct SettingsView: View {
                         SecureField("", text: $githubPATDraft, prompt: Text("paste token"))
                             .settingsTextField(focused: focus == .pat)
                             .focused($focus, equals: .pat)
+                            .accessibilityLabel("Replace GitHub token")
                     }
                     rowDivider
                     HStack(spacing: 8) {
@@ -131,7 +133,7 @@ struct SettingsView: View {
                     if app.projectRoots.isEmpty {
                         caption("No project folders. Add one to scan its project-scope skills.")
                     } else {
-                        ForEach(Array(app.projectRoots.enumerated()), id: \.element) { index, root in
+                        ForEach(app.projectRoots.enumerated(), id: \.element) { index, root in
                             settingsRow((root as NSString).abbreviatingWithTildeInPath) {
                                 Button(role: .destructive) {
                                     app.projectRoots.removeAll { $0 == root }
@@ -149,9 +151,9 @@ struct SettingsView: View {
 
                 if !app.allAgents.isEmpty {
                     settingsSection("Visible agents") {
-                        ForEach(Array(app.allAgents.enumerated()), id: \.element) { index, agent in
+                        ForEach(app.allAgents.enumerated(), id: \.element) { index, agent in
                             settingsRow(agent) {
-                                Toggle("", isOn: Binding(
+                                Toggle(agent, isOn: Binding(
                                     get: { !app.hiddenAgents.contains(agent) },
                                     set: { visible in
                                         if visible { app.hiddenAgents.remove(agent) }

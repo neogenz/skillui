@@ -35,20 +35,25 @@ struct DashboardView: View {
         }
         .frame(minWidth: 840, minHeight: 460)
         .task { if app.projectScanSkills.isEmpty { await app.scanProjects() } }
-        .onAppear {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        .onDisappear { NSApp.setActivationPolicy(.accessory) }
+        .onAppear { app.enterRegularActivation() }
+        .onDisappear { app.leaveRegularActivation() }
     }
 
     // MARK: Sidebar (source list)
 
     private var sidebar: some View {
-        List(selection: $nav) {
+        // Snapshot + group the dashboard skills ONCE per sidebar build. `app.dashboardSkills` is a
+        // computed property that allocates a fresh array on each access, and the old code re-filtered
+        // it per project group (O(P·N) plus P fresh allocations) — the cost grew exactly with the
+        // dashboard's headline job of scanning many projects. Derive the per-group slices up front.
+        let dashboardSkills = app.dashboardSkills
+        let byGroup = Dictionary(grouping: dashboardSkills, by: { $0.projectGroup })
+        let scopeCounts = Dictionary(grouping: dashboardSkills, by: { $0.scope }).mapValues(\.count)
+        let groups = projectGroups(dashboardSkills)
+        return List(selection: $nav) {
             Section {
                 Label("All Skills", systemImage: "square.grid.2x2")
-                    .badge(app.dashboardSkills.count)
+                    .badge(dashboardSkills.count)
                     .tag(Nav.all)
                 Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                     .badge(updatesCount)
@@ -56,16 +61,16 @@ struct DashboardView: View {
             }
             Section("Library") {
                 Label("Global", systemImage: "globe")
-                    .badge(scopeCount(.global))
+                    .badge(scopeCounts[.global] ?? 0)
                     .tag(Nav.scope(.global))
                 Label("Project", systemImage: "folder")
-                    .badge(scopeCount(.project))
+                    .badge(scopeCounts[.project] ?? 0)
                     .tag(Nav.scope(.project))
             }
-            if !projectGroups.isEmpty {
+            if !groups.isEmpty {
                 Section("Projects") {
-                    ForEach(projectGroups, id: \.self) { group in
-                        projectRow(group)
+                    ForEach(groups, id: \.self) { group in
+                        projectRow(group, skills: byGroup[group] ?? [])
                     }
                 }
             }
@@ -134,8 +139,8 @@ struct DashboardView: View {
     }
 
     /// A project that spans several worktrees expands to them; a single-checkout project is a leaf.
-    @ViewBuilder private func projectRow(_ group: String) -> some View {
-        let trees = worktrees(in: group)
+    @ViewBuilder private func projectRow(_ group: String, skills groupSkills: [Skill]) -> some View {
+        let trees = worktrees(in: group, skills: groupSkills)
         if trees.count > 1 {
             DisclosureGroup(isExpanded: expansion(for: group, trees: trees)) {
                 ForEach(trees) { tree in
@@ -143,7 +148,7 @@ struct DashboardView: View {
                 }
             } label: {
                 Label(group, systemImage: "shippingbox")
-                    .badge(projectCount(group))
+                    .badge(groupSkills.count)
                     .tag(Nav.project(group))
                     .help("\(group) — \(trees.count) worktrees")
                     .contextMenu { revealButton(mainPath(trees)) }
@@ -151,7 +156,7 @@ struct DashboardView: View {
         } else if let only = trees.first {
             worktreeLabel(only, group: group, leaf: true)
         } else {
-            Label(group, systemImage: "shippingbox").badge(projectCount(group)).tag(Nav.project(group))
+            Label(group, systemImage: "shippingbox").badge(groupSkills.count).tag(Nav.project(group))
         }
     }
 
@@ -203,11 +208,16 @@ struct DashboardView: View {
     // MARK: Detail (toolbar + table)
 
     private var detailPane: some View {
-        VStack(spacing: 0) {
+        // Derive the filtered+sorted rows ONCE per body. `rows` runs a filter + full sort, and was
+        // read ~4-6× per pass (subtitle count, the toolbar's "Update all", the table, the empty-state
+        // overlay), re-running on every search keystroke and status change. `updatableRows` folded in.
+        let rows = self.rows
+        let updatable = rows.filter { app.effectiveStatus(for: $0) == .updateAvailable }
+        return VStack(spacing: 0) {
             if !app.worktreeGaps.isEmpty { gapBanner }
             if app.githubCredentialNeedsAttention { keychainBanner }
             if app.isRateLimited && !app.hasConfiguredGitHubCredential { rateLimitBanner }
-            table
+            table(rows)
         }
             .navigationTitle(navTitle)
             .navigationSubtitle("^[\(rows.count) skill](inflect: true)")
@@ -234,13 +244,13 @@ struct DashboardView: View {
                         .help("Open the latest update activity log")
                     }
                 }
-                if !updatableRows.isEmpty {
+                if !updatable.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        Button { Task { await app.updateMany(updatableRows) } } label: {
-                            Label("Update all (\(updatableRows.count))", systemImage: "arrow.up.circle")
+                        Button { Task { await app.updateMany(updatable) } } label: {
+                            Label("Update all (\(updatable.count))", systemImage: "arrow.up.circle")
                         }
                         .prominentAction()
-                        .help("Update the \(updatableRows.count) skills with updates in this view")
+                        .help("Update the \(updatable.count) skills with updates in this view")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -261,7 +271,7 @@ struct DashboardView: View {
 
     // MARK: Table
 
-    private var table: some View {
+    private func table(_ rows: [Skill]) -> some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Skill", value: \.name) { s in
                 Text(s.name).fontWeight(.medium).lineLimit(1)
@@ -294,14 +304,14 @@ struct DashboardView: View {
         }
         .tableStyle(.inset)
         .contextMenu(forSelectionType: Skill.ID.self) { ids in
-            rowMenu(ids)
+            rowMenu(ids, in: rows)
         } primaryAction: { ids in
             if ids.count == 1, let s = rows.first(where: { ids.contains($0.id) }) { open(s.skillsShURL) }
         }
-        .overlay { emptyState }
+        .overlay { emptyState(rows) }
     }
 
-    @ViewBuilder private func rowMenu(_ ids: Set<Skill.ID>) -> some View {
+    @ViewBuilder private func rowMenu(_ ids: Set<Skill.ID>, in rows: [Skill]) -> some View {
         let picked = rows.filter { ids.contains($0.id) }
         if picked.count == 1, let s = picked.first {
             Button("Open on skills.sh", systemImage: "safari") { open(s.skillsShURL) }
@@ -322,7 +332,7 @@ struct DashboardView: View {
 
     private func open(_ url: URL?) { if let url { NSWorkspace.shared.open(url) } }
 
-    @ViewBuilder private var emptyState: some View {
+    @ViewBuilder private func emptyState(_ rows: [Skill]) -> some View {
         if rows.isEmpty {
             if app.isScanningProjects {
                 ContentUnavailableView { Label("Scanning projects…", systemImage: "magnifyingglass") }
@@ -380,10 +390,10 @@ struct DashboardView: View {
 
     // MARK: Derived state
 
-    private var projectGroups: [String] {
+    private func projectGroups(_ dashboardSkills: [Skill]) -> [String] {
         // Include groups that only show up via gaps (a worktree with a lockfile but no installed
         // skills) so the tree lists it even before anything is hydrated.
-        let fromSkills = app.dashboardSkills.compactMap { $0.projectGroup }
+        let fromSkills = dashboardSkills.compactMap { $0.projectGroup }
         let fromGaps = app.worktreeGaps.map(\.group)
         return Array(Set(fromSkills + fromGaps))
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -392,21 +402,18 @@ struct DashboardView: View {
     private var updatesCount: Int {
         app.dashboardSkills.reduce(into: 0) { n, s in if app.effectiveStatus(for: s) == .updateAvailable { n += 1 } }
     }
-    /// Updatable skills within the current filtered view — drives the toolbar "Update all".
-    private var updatableRows: [Skill] {
-        rows.filter { app.effectiveStatus(for: $0) == .updateAvailable }
-    }
-    private func scopeCount(_ scope: Scope) -> Int { app.dashboardSkills.lazy.filter { $0.scope == scope }.count }
-    private func projectCount(_ group: String) -> Int { app.dashboardSkills.lazy.filter { $0.projectGroup == group }.count }
 
     /// One node per distinct worktree (by its on-disk root) inside a repo group; main checkout first.
     private struct WorktreeNode: Identifiable, Hashable {
         let group: String, path: String, name: String, count: Int, isMain: Bool, missing: Int
         var id: String { path }
     }
+    /// Single-group convenience (used by `projectColumn`); the sidebar passes its precomputed slice.
     private func worktrees(in group: String) -> [WorktreeNode] {
-        let byPath = Dictionary(grouping: app.dashboardSkills.filter { $0.projectGroup == group },
-                                by: { $0.projectPath ?? "" })
+        worktrees(in: group, skills: app.dashboardSkills.filter { $0.projectGroup == group })
+    }
+    private func worktrees(in group: String, skills groupSkills: [Skill]) -> [WorktreeNode] {
+        let byPath = Dictionary(grouping: groupSkills, by: { $0.projectPath ?? "" })
         // Worktrees that have a lockfile but nothing (or little) installed only show up as gaps —
         // union them in so the tree lists them, flagged, instead of hiding them until hydrated.
         let gaps = Dictionary(app.worktreeGaps.filter { $0.group == group }.map { ($0.path, $0) },
