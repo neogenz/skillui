@@ -31,9 +31,14 @@ APPDIR="$ROOT/dist/$APP.app"
 MACOS="$APPDIR/Contents/MacOS"
 RES="$APPDIR/Contents/Resources"
 
-# Note: we overwrite files in place rather than recursively deleting the bundle.
-# The bundle has a fixed, tiny file set (binary + Info.plist), so no orphans accumulate.
+# Replace files by UNLINKING first, not overwriting in place. `cp` onto an existing path truncates
+# and rewrites the SAME inode; if a previously-built Skillui.app is still running, its mmap'd
+# executable then faults in mismatched bytes on the next lazy page-in and the kernel SIGKILLs it
+# with a code-signature "invalid page" error (EXC_BAD_ACCESS / CODESIGNING). Removing first gives
+# each file a fresh inode, so a running instance keeps its old (now-unlinked) inode intact until it
+# exits. The bundle has a fixed, tiny file set (binary + Info.plist + icon), so no orphans accumulate.
 mkdir -p "$MACOS" "$RES"
+rm -f "$MACOS/$APP" "$APPDIR/Contents/Info.plist" "$RES/AppIcon.icns"
 cp "$BINDIR/$APP" "$MACOS/$APP"
 cp "$ROOT/Info.plist" "$APPDIR/Contents/Info.plist"
 if [[ -f "$ROOT/assets/AppIcon.icns" ]]; then
