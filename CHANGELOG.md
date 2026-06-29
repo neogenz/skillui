@@ -4,6 +4,20 @@ All notable changes to Skillui are documented here. Keep the newest release firs
 
 ## Unreleased
 
+## v0.1.0-beta.3
+
+Bug-fix beta: installing or scanning skills no longer fails when the app is launched from
+Finder/Spotlight (the normal way for a menu-bar app).
+
+### Fixed
+
+- "Install missing skills", scan, and update no longer fail with `env: node: No such file or
+  directory`. A GUI app launched from Finder inherits only launchd's stripped `PATH`, so the
+  `npx` child (a `#!/usr/bin/env node` script) couldn't find `node`. Skillui now forwards the
+  login shell's `PATH` — plus the resolved binary's own directory — to every `skills` CLI
+  child, so `node` (and any `git`/`npm`/`pnpm` the CLI shells out to) resolves regardless of
+  how the app was launched.
+
 ## v0.1.0-beta.2
 
 Maintenance beta from a full code audit: correctness, performance, accessibility, and

@@ -65,8 +65,8 @@ enum DebugCLI {
                 print("CLI: not found (no `skills`/`npx` on login PATH)")
                 sem.signal(); return
             }
-            print("CLI: \(invocation.joined(separator: " "))")
-            let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation), projectRoots: [])
+            print("CLI: \(invocation.argv.joined(separator: " "))")
+            let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath), projectRoots: [])
             let outcome = await scanner.scan()
             print("skills: \(outcome.skills.count)  error: \(outcome.error ?? "none")\n")
 

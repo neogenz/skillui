@@ -23,14 +23,31 @@ enum CLIError: Error, LocalizedError {
 struct SkillsCLI: Sendable {
     let invocation: [String]   // e.g. ["/opt/homebrew/bin/npx","--yes","skills"]
 
+    /// Extra env for every child. Carries a `PATH` that can find `node` — GUI apps inherit only
+    /// launchd's stripped `PATH`, so `npx` (`#!/usr/bin/env node`) would otherwise die with
+    /// `env: node: No such file or directory`. We front it with the login-shell `PATH` (when we
+    /// probed one) and the launch binary's own directory (node sits beside npx for nvm/Homebrew/
+    /// volta/asdf), then the inherited `PATH` as a backstop.
+    private let extraEnv: [String: String]
+
     private var launchPath: String { invocation[0] }
     private var baseArgs: [String] { Array(invocation.dropFirst()) }
+
+    init(invocation: [String], loginPath: String? = nil) {
+        self.invocation = invocation
+        let binDir = invocation.first.map { ($0 as NSString).deletingLastPathComponent } ?? ""
+        let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let path = [loginPath ?? "", binDir, inherited]
+            .filter { !$0.isEmpty }
+            .joined(separator: ":")
+        self.extraEnv = path.isEmpty ? [:] : ["PATH": path]
+    }
 
     /// `skills list -g|-p --json`. Default CLI scope is project, so we always pass a flag.
     func list(scope: Scope, cwd: String? = nil) async throws -> [CLISkill] {
         let r = await ProcessRunner.run(launchPath: launchPath,
                                         args: baseArgs + ["list", scope.cliFlag, "--json"],
-                                        cwd: cwd, dropStderr: true)
+                                        cwd: cwd, extraEnv: extraEnv, dropStderr: true)
         guard r.status == 0 else { throw CLIError.nonZero(r.status, r.stderrString) }
         // Clean JSON is the normal case; only fall back to slicing if that fails.
         if let skills = try? JSONDecoder().decode([CLISkill].self, from: r.stdout) { return skills }
@@ -50,11 +67,12 @@ struct SkillsCLI: Sendable {
             r = await ProcessRunner.runStreaming(launchPath: launchPath,
                                                  args: args,
                                                  cwd: cwd,
+                                                 extraEnv: extraEnv,
                                                  onOutput: onOutput)
         } else {
             r = await ProcessRunner.run(launchPath: launchPath,
                                         args: args,
-                                        cwd: cwd, dropStderr: false)
+                                        cwd: cwd, extraEnv: extraEnv, dropStderr: false)
         }
         guard r.status == 0 else { throw CLIError.nonZero(r.status, r.combinedString) }
         return r.combinedString
@@ -70,11 +88,12 @@ struct SkillsCLI: Sendable {
             r = await ProcessRunner.runStreaming(launchPath: launchPath,
                                                  args: args,
                                                  cwd: cwd,
+                                                 extraEnv: extraEnv,
                                                  onOutput: onOutput)
         } else {
             r = await ProcessRunner.run(launchPath: launchPath,
                                         args: args,
-                                        cwd: cwd, dropStderr: false)
+                                        cwd: cwd, extraEnv: extraEnv, dropStderr: false)
         }
         guard r.status == 0 else { throw CLIError.nonZero(r.status, r.combinedString) }
         return r.combinedString

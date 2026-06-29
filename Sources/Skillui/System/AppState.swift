@@ -94,7 +94,7 @@ final class AppState {
         static let globalRoot = "globalSkillsRootOverride"
         static let autoScan = "autoScanProjects"
     }
-    private var cachedInvocation: [String]?
+    private var cachedInvocation: ResolvedCLI?
     private let cacheStore = UpdateCacheStore()
     private var refreshTask: Task<Void, Never>?
     private static let maxActivityLogCharacters = 200_000
@@ -508,7 +508,7 @@ final class AppState {
 
     // MARK: Discovery
 
-    private func resolveCLI() async -> [String]? {
+    private func resolveCLI() async -> ResolvedCLI? {
         if let cachedInvocation { return cachedInvocation }
         let inv = await ShellEnvironment.resolveSkillsInvocation(
             override: cliPathOverride.isEmpty ? nil : cliPathOverride)
@@ -530,7 +530,7 @@ final class AppState {
 
         let globalRoots = LinkClassifier.defaultGlobalRoots(
             customGlobalRoot: globalSkillsRootOverride.isEmpty ? nil : globalSkillsRootOverride)
-        let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation),
+        let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath),
                                    projectRoots: projectRoots, globalRoots: globalRoots)
         let outcome = await scanner.scan()
         skills = outcome.skills.sorted(by: Self.order)
@@ -663,7 +663,7 @@ final class AppState {
                 }
                 return
             }
-            let cli = SkillsCLI(invocation: invocation)
+            let cli = SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath)
             for (path, id) in zip(distinct, itemIDs) {
                 self.markActivityItem(id, status: .running, command: cli.installFromLockCommand(cwd: path))
                 do {
@@ -739,7 +739,7 @@ final class AppState {
                 self.markActivityItem(itemID, status: .failed, message: "Couldn't find `skills` or `npx`. Set a path in Settings.")
                 return
             }
-            let cli = SkillsCLI(invocation: invocation)
+            let cli = SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath)
             self.markActivityItem(itemID, status: .running,
                                   command: cli.updateCommand(name: skill.name, scope: skill.scope, cwd: skill.projectPath))
             do {
@@ -829,7 +829,7 @@ final class AppState {
                 }
                 return
             }
-            let cli = SkillsCLI(invocation: invocation)
+            let cli = SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath)
             // Gate on the live status: a per-row updateSkill that landed first may have already
             // cleared one of these, so re-running `skills update` on it would be redundant.
             for (t, itemID) in zip(distinct, itemIDs) {
