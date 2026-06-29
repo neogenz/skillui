@@ -1,11 +1,41 @@
 {
   "version": 1,
   "skills": {
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "781bd6d3f9b19f8c9af6b53d8d0e4876d0183841b565db34ca7092ffa412d111"
+    },
     "impeccable": {
       "source": "pbakaus/impeccable",
       "sourceType": "github",
       "skillPath": ".agents/skills/impeccable/SKILL.md",
       "computedHash": "d28c91b173fd8563f34dd5d9590d194e820a96ca6ae401453e39c72e9f908463"
+    },
+    "macos-spm-app-packaging": {
+      "source": "dimillian/skills",
+      "sourceType": "github",
+      "skillPath": "macos-spm-app-packaging/SKILL.md",
+      "computedHash": "dd9fba9ca23b45f1c12db08470da9726b294bd6fb334f63d3447872efdf392c3"
+    },
+    "swift-concurrency": {
+      "source": "avdlee/swift-concurrency-agent-skill",
+      "sourceType": "github",
+      "skillPath": "swift-concurrency/SKILL.md",
+      "computedHash": "5e1f6433159038c49135028eeeea3a7b9a0a6001c8a4cc8227e391caf35cd985"
+    },
+    "swiftui-expert-skill": {
+      "source": "avdlee/swiftui-agent-skill",
+      "sourceType": "github",
+      "skillPath": "swiftui-expert-skill/SKILL.md",
+      "computedHash": "12a318304d7cdc6ec40e981f02865d098caf6eab1b992051e3322ebeecf287b1"
+    },
+    "swiftui-performance-audit": {
+      "source": "dimillian/skills",
+      "sourceType": "github",
+      "skillPath": "swiftui-performance-audit/SKILL.md",
+      "computedHash": "4c153a7401d4d878fad3b7b83ca3d29f43245f8404dd34b7beb400cdfcab46f7"
     }
   }
 }

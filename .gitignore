@@ -19,6 +19,8 @@ dist/
 # Track only this project's OWN skills (add a "!" line for each new custom skill).
 .agents/skills/*
 !.agents/skills/release-skillui/
+.claude/skills/*
+!.claude/skills/release-skillui/
 
 # Agent working output — plans, scratch, generated artifacts. Never source; never commit.
 .codex/output/
