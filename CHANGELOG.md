@@ -4,6 +4,32 @@ All notable changes to Skillui are documented here. Keep the newest release firs
 
 ## Unreleased
 
+## v0.1.0-beta.4
+
+Dashboard install experience: a project-scoped install flow, readable activity logs, and honest
+handling of skills whose source can't be auto-installed.
+
+### Added
+
+- A focused project with skills declared but not installed now shows a scoped "Install N skills"
+  call-to-action — a contextual banner, or the empty-state when nothing is installed yet — instead
+  of only the generic cross-project banner, so it's clear the action applies to the folder in focus.
+- "Copy path" in the project tree's right-click menu (worktree rows and multi-worktree project rows).
+
+### Changed
+
+- The install activity log is readable now: the `skills` CLI progress spinner is collapsed to its
+  final line and terminal control codes are stripped, instead of leaking hundreds of `[999D[J` lines.
+- A failed install shows a concise reason (e.g. "Failed to clone …") instead of the full raw dump.
+- Installing a project that mixes cloneable and non-git sources no longer aborts on the first bad
+  source: each cloneable source installs on its own, so one un-cloneable entry can't block the rest.
+
+### Fixed
+
+- A skill whose lockfile source isn't a git repository (e.g. a bare domain like `likec4.dev`) is
+  detected up front, shown with its reason ("source '…' isn't a git repository"), and never offered
+  a no-op install button — install counts and buttons act only on skills that can actually be installed.
+
 ## v0.1.0-beta.3
 
 Bug-fix beta: installing or scanning skills no longer fails when the app is launched from
