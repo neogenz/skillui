@@ -76,6 +76,10 @@ present but empty for the next cycle).
 3. `Info.plist` → `CFBundleShortVersionString` equals `<version>`; bump it if not.
 4. `assets/AppIcon.icns` exists.
 5. `CHANGELOG.md` has the `## v<version>` section per the template above.
+6. The `tag-protection` / `main-protection` rulesets are active (`gh api repos/neogenz/skillui/rulesets`).
+   Publishing a **new** `v<version>` tag is allowed; the rulesets only block deleting or force-moving
+   an existing tag and force-pushing/deleting `main` (see `docs/release.md` → "Repository Protection").
+   No action needed unless a tag must be removed — then follow **Rollback**.
 
 If a remote is missing or the `gh` account cannot write the target repo, STOP and surface that —
 publishing cannot succeed until it is fixed. Do not invent a remote.
@@ -206,10 +210,19 @@ smoke tests only.
 
 ## Rollback
 
-If a release is wrong, delete it and the tag, fix, and re-run:
+`v*` tags are **immutable** — the `tag-protection` ruleset blocks tag deletion/force-move with no
+bypass (see `docs/release.md` → "Repository Protection"). So a naive `git push origin :refs/tags/$TAG`
+is **rejected**. Deleting a bad release tag is a deliberate three-step: loosen the ruleset, delete,
+re-lock.
 
 ```bash
+RS=$(gh api repos/neogenz/skillui/rulesets --jq '.[] | select(.name=="tag-protection") | .id')
+gh api -X PATCH repos/neogenz/skillui/rulesets/$RS -f enforcement=disabled   # temporarily unlock
 gh release delete "$TAG" --yes
-git push origin ":refs/tags/$TAG"
+git push origin ":refs/tags/$TAG"     # now allowed
 git tag -d "$TAG"
+gh api -X PATCH repos/neogenz/skillui/rulesets/$RS -f enforcement=active     # RE-LOCK (don't skip)
 ```
+
+Prefer **rolling forward** (publish a fixed higher version) over deleting a published tag — that keeps
+releases append-only and avoids the unlock window. Delete only an unreleased/mistaken tag.

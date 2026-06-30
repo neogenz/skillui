@@ -14,6 +14,46 @@ Add these repository secrets:
 
 Set the repository that hosts releases in the build with `SKILLUI_RELEASE_REPO`. The GitHub workflow sets this automatically to `${{ github.repository }}`.
 
+## Repository Protection (rulesets)
+
+A published release must never be silently deleted or force-moved, so the `v*` tags are
+**immutable**. Two GitHub rulesets enforce the baseline (configured once; inspect with
+`gh api repos/neogenz/skillui/rulesets`):
+
+- **`tag-protection`** (target `tag`, active): pattern `refs/tags/v*`, rules `deletion` +
+  `non_fast_forward`, **no bypass actors** — `v*` release tags can't be deleted or force-moved by
+  anyone, admins included. This is what makes a published release tamper-evident. Creating a *new*
+  tag is unaffected, so normal releases work as usual.
+- **`main-protection`** (target `branch`, active): default branch, rules `deletion` +
+  `non_fast_forward` — blocks force-push and deletion of `main` while leaving the direct-push
+  release flow (`scripts/release.sh` → push `main` → push tag) working.
+
+Recreate them on a fresh repo:
+
+```bash
+REPO=neogenz/skillui
+gh api -X POST repos/$REPO/rulesets --input - <<'JSON'
+{ "name": "tag-protection", "target": "tag", "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
+  "rules": [ {"type":"deletion"}, {"type":"non_fast_forward"} ], "bypass_actors": [] }
+JSON
+gh api -X POST repos/$REPO/rulesets --input - <<'JSON'
+{ "name": "main-protection", "target": "branch", "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [ {"type":"deletion"}, {"type":"non_fast_forward"} ], "bypass_actors": [] }
+JSON
+```
+
+Keep secret scanning + push protection + Dependabot on (Settings → Code security, or via API):
+
+```bash
+gh api -X PUT repos/$REPO/vulnerability-alerts          # Dependabot alerts
+gh api -X PUT repos/$REPO/automated-security-fixes      # Dependabot security updates
+```
+
+Because `tag-protection` has **no bypass**, deleting a bad `v*` tag is a deliberate two-step — see
+**Rollback** in the `release-skillui` skill.
+
 ## One-Time Local Signing Setup
 
 To build a signed + notarized DMG **on your own Mac** (instead of in CI), set this up once.
