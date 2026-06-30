@@ -36,6 +36,9 @@ struct UpdateActivityItem: Identifiable, Sendable {
     var startedAt: Date?
     var finishedAt: Date?
     var log: String
+    /// A `.warning` that means "this skill can't be auto-installed (non-git source)" rather than the
+    /// update-recheck "still found update rows" case — drives a different, retry-free attention panel.
+    var isBlockedNotice: Bool
 
     init(id: UUID = UUID(),
          title: String,
@@ -44,7 +47,8 @@ struct UpdateActivityItem: Identifiable, Sendable {
          status: UpdateActivityStatus = .queued,
          startedAt: Date? = nil,
          finishedAt: Date? = nil,
-         log: String = "") {
+         log: String = "",
+         isBlockedNotice: Bool = false) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -53,6 +57,7 @@ struct UpdateActivityItem: Identifiable, Sendable {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.log = log
+        self.isBlockedNotice = isBlockedNotice
     }
 
     var duration: TimeInterval? {

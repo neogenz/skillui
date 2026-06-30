@@ -434,9 +434,9 @@ final class AppState {
     private func appendActivityLog(_ id: UUID, _ chunk: String) {
         guard !chunk.isEmpty,
               let index = updateActivity?.items.firstIndex(where: { $0.id == id }) else { return }
-        var log = updateActivity?.items[index].log ?? ""
-        log += chunk
-        if !log.hasSuffix("\n") { log += "\n" }
+        // Re-clean the (already-clean, hence small) accumulated log together with the new chunk so
+        // the spinner's `ESC[999D`/`ESC[J` repaints collapse instead of leaking as literal `[999D[J`.
+        var log = TerminalLog.clean((updateActivity?.items[index].log ?? "") + chunk)
         if log.count > Self.maxActivityLogCharacters {
             log = "[Earlier output truncated]\n" + String(log.suffix(Self.maxActivityLogCharacters))
         }
@@ -626,11 +626,18 @@ final class AppState {
             let lock = LockfileParser.read(LockfileParser.projectLockURL(projectRoot: path))
             guard !lock.isEmpty else { continue }
             let have = Set((byPath[path] ?? []).map(\.name))
-            let missing = lock.keys.filter { !have.contains($0) }.sorted()
+            // `lock` is already the full `[String: LockEntry]` — classify each missing entry's source
+            // here so the gap knows what's installable vs blocked, no extra parsing.
+            let missing = lock
+                .filter { !have.contains($0.key) }
+                .map { name, entry in
+                    MissingSkill(name: name, package: entry.installPackage, isInstallable: !entry.isBlockedSource)
+                }
+                .sorted { $0.name < $1.name }
             guard !missing.isEmpty else { continue }
             let meta = GitInfo.meta(for: path)
             gaps.append(WorktreeGap(path: path, name: meta.name, group: meta.mainRepo ?? meta.name,
-                                    isWorktree: meta.isWorktree, missing: missing, expected: lock.count))
+                                    isWorktree: meta.isWorktree, entries: missing, expected: lock.count))
         }
         return gaps.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
@@ -641,19 +648,65 @@ final class AppState {
         await installMissingSkills(at: [path])
     }
 
+    /// One planned unit of install work. A worktree with only cloneable sources gets the single fast
+    /// `experimental_install`; one with a blocked (non-git) source installs each cloneable source on
+    /// its own (so the bad source fails alone instead of aborting the batch) and reports the blocked
+    /// skills as a warning.
+    private enum InstallStep {
+        case experimental(path: String)
+        case add(path: String, package: String, skills: [String])
+        case blocked(path: String, skills: [MissingSkill])
+
+        var path: String {
+            switch self {
+            case .experimental(let p), .add(let p, _, _), .blocked(let p, _): return p
+            }
+        }
+    }
+
+    private func installStepItem(_ step: InstallStep) -> UpdateActivityItem {
+        let worktree = (step.path as NSString).lastPathComponent
+        switch step {
+        case .experimental:
+            return UpdateActivityItem(title: "Install missing skills",
+                                      subtitle: (step.path as NSString).abbreviatingWithTildeInPath)
+        case .add(_, let package, let skills):
+            return UpdateActivityItem(title: "Install \(skills.count) skill\(skills.count == 1 ? "" : "s") from \(package)",
+                                      subtitle: worktree)
+        case .blocked(_, let skills):
+            return UpdateActivityItem(title: "Skip \(skills.count) un-installable skill\(skills.count == 1 ? "" : "s")",
+                                      subtitle: worktree, isBlockedNotice: true)
+        }
+    }
+
     func installMissingSkills(at paths: [String]) async {
         let distinct = Array(Set(paths)).sorted()
             .filter { !installingPaths.contains($0) }
         guard !distinct.isEmpty else { return }
         for path in distinct { installingPaths.insert(path) }
-        let items = distinct.map { path in
-            UpdateActivityItem(title: "Install missing skills",
-                               subtitle: (path as NSString).abbreviatingWithTildeInPath)
+
+        // Plan every step up front (the activity session wants its items before execution). A worktree
+        // whose declared sources are all cloneable keeps today's single `experimental_install`; one
+        // with a blocked source instead installs each cloneable source via its own `skills add` so a
+        // bad source (e.g. `likec4.dev`) fails in isolation and the rest still converge.
+        var steps: [InstallStep] = []
+        for path in distinct {
+            let gap = worktreeGaps.first { $0.path == path }
+            if let gap, !gap.blocked.isEmpty {
+                let bySource = Dictionary(grouping: gap.installable, by: { $0.package ?? "" })
+                for (package, skills) in bySource.sorted(by: { $0.key < $1.key }) where !package.isEmpty {
+                    steps.append(.add(path: path, package: package, skills: skills.map(\.name).sorted()))
+                }
+                steps.append(.blocked(path: path, skills: gap.blocked))
+            } else {
+                steps.append(.experimental(path: path))
+            }
         }
+
         let itemIDs = beginUpdateActivity(
             title: distinct.count == 1 ? "Installing missing skills" : "Installing missing skills in \(distinct.count) worktrees",
-            subtitle: "`skills experimental_install` is restoring project-scope skills from lockfiles.",
-            items: items)
+            subtitle: "Restoring project-scope skills declared in skills-lock.json.",
+            items: steps.map(installStepItem))
 
         await serialize {
             defer { self.installingPaths.subtract(distinct) }
@@ -664,22 +717,54 @@ final class AppState {
                 return
             }
             let cli = SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath)
-            for (path, id) in zip(distinct, itemIDs) {
-                self.markActivityItem(id, status: .running, command: cli.installFromLockCommand(cwd: path))
-                do {
-                    try await cli.installFromLock(cwd: path, onOutput: self.activityOutputSink(id))
-                    self.markActivityItem(id, status: .succeeded, message: "Install completed.")
-                } catch {
-                    self.lastError = "Install failed for \((path as NSString).lastPathComponent): \(error.localizedDescription)"
-                    self.markActivityItem(id, status: .failed, message: error.localizedDescription)
+            for (step, id) in zip(steps, itemIDs) {
+                switch step {
+                case .experimental(let path):
+                    self.markActivityItem(id, status: .running, command: cli.installFromLockCommand(cwd: path))
+                    do {
+                        try await cli.installFromLock(cwd: path, onOutput: self.activityOutputSink(id))
+                        self.markActivityItem(id, status: .succeeded, message: "Install completed.")
+                    } catch {
+                        self.reportInstallFailure(error, id: id, path: path)
+                    }
+                case .add(let path, let package, let skills):
+                    self.markActivityItem(id, status: .running, command: cli.addSkillsCommand(package: package, skills: skills, cwd: path))
+                    do {
+                        try await cli.addSkills(package: package, skills: skills, cwd: path, onOutput: self.activityOutputSink(id))
+                        self.markActivityItem(id, status: .succeeded, message: "Installed \(skills.count) skill\(skills.count == 1 ? "" : "s") from \(package).")
+                    } catch {
+                        self.reportInstallFailure(error, id: id, path: path)
+                    }
+                case .blocked(_, let skills):
+                    let lines = skills.map { "• \($0.name) — \($0.blockedReason)" }.joined(separator: "\n")
+                    self.markActivityItem(id, status: .warning,
+                                          message: "These skills can't be auto-installed:\n\(lines)")
                 }
             }
+            // Rescan INSIDE the serial chain (like updateMany/updateSkill) so `worktreeGaps` is
+            // recomputed before the `defer` above clears `installingPaths` — otherwise the install
+            // buttons re-enable while the dashboard still shows the now-stale gap, and a second click
+            // would spawn a redundant install. `scanProjects` has its own single-flight guard, not the
+            // serial chain, so there's no re-entrancy.
+            let scanID = self.addActivityItem(title: "Refresh project scan",
+                                              subtitle: "Rebuilding the dashboard view after install.")
+            self.markActivityItem(scanID, status: .running)
+            await self.scanProjects(force: true)
+            self.markActivityItem(scanID, status: .succeeded, message: "Project scan refreshed.")
         }
-        let scanID = addActivityItem(title: "Refresh project scan",
-                                     subtitle: "Rebuilding the dashboard view after install.")
-        markActivityItem(scanID, status: .running)
-        await scanProjects(force: true)
-        markActivityItem(scanID, status: .succeeded, message: "Project scan refreshed.")
+    }
+
+    /// Concise, honest failure line for the activity log + the menu-bar error banner — the CLI's
+    /// streamed dump is reduced to its meaningful reason (e.g. "Failed to clone likec4.dev: …").
+    private func reportInstallFailure(_ error: Error, id: UUID, path: String) {
+        let detail: String
+        if case let CLIError.nonZero(code, output) = error {
+            detail = TerminalLog.failureSummary(output) ?? "skills exited with code \(code) — see the log."
+        } else {
+            detail = error.localizedDescription
+        }
+        lastError = "Install failed in \((path as NSString).lastPathComponent): \(detail)"
+        markActivityItem(id, status: .failed, message: "Install failed: \(detail)")
     }
 
     /// True when any update check failed due to GitHub rate limiting — surfaced as a banner

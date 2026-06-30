@@ -195,6 +195,9 @@ private func writeTempLock(_ json: String) throws -> URL {
         == "cd '/tmp/My Project'\n/usr/bin/npx --yes skills update 'ui kit' -p -y")
     #expect(cli.installFromLockCommand(cwd: "/tmp/Project's Worktree")
         == "cd '/tmp/Project'\\''s Worktree'\n/usr/bin/npx --yes skills experimental_install -y")
+    // Per-source convergent install: space-separated skills, project + universal-agent defaults.
+    #expect(cli.addSkillsCommand(package: "owner/repo", skills: ["a", "b"], cwd: "/tmp/My Project")
+        == "cd '/tmp/My Project'\n/usr/bin/npx --yes skills add owner/repo -s a b -y")
 }
 
 @Test func updateActivityCombinedLogIncludesCommandsAndEmptyOutput() {
@@ -225,4 +228,49 @@ private func writeTempLock(_ json: String) throws -> URL {
     #expect(activity.warningCount == 1)
     #expect(activity.failedCount == 0)
     #expect(activity.combinedLog.contains("[Attention]"))
+}
+
+@Test func terminalLogCollapsesSpinnerRepaintsAndStripsAnsi() {
+    let esc = "\u{1B}"
+    // The exact shape `skills experimental_install` streams: a hidden cursor, then one line repainted
+    // with ESC[999D (cursor home) + ESC[J (erase) between spinner frames, ending on the final message.
+    let raw = """
+    \(esc)[?25l│
+    \(esc)[999D\(esc)[J◒  Cloning repository\(esc)[999D\(esc)[J◐  Cloning repository.\(esc)[999D\(esc)[J◓  Cloning repository..\(esc)[999D\(esc)[J◇  Repository cloned
+    \(esc)[?25h│
+    """
+    let cleaned = TerminalLog.clean(raw)
+    #expect(!cleaned.contains("[999D"))           // control codes gone
+    #expect(!cleaned.contains("[J"))
+    #expect(!cleaned.contains("[?25"))
+    #expect(cleaned.contains("◇  Repository cloned"))
+    // The repainted line collapses to a single rendered frame, not one line per spinner tick.
+    #expect(cleaned.components(separatedBy: "Cloning repository").count - 1 <= 1)
+    // Idempotent: re-cleaning an already-clean log is a no-op (the streaming sink relies on this).
+    #expect(TerminalLog.clean(cleaned) == cleaned)
+}
+
+@Test func terminalLogExtractsConciseFailureReason() {
+    // The exact failure block `skills experimental_install` emits when a lockfile source isn't a
+    // cloneable git repo. The summary must name the source + reason, stripped of box glyphs, and must
+    // NOT be the whole dump.
+    let raw = """
+    ●   claude-code_agent  Agent detected — installing non-interactively
+    ◇  Source: likec4.dev
+    ■  Failed to clone repository
+    │  Failed to clone likec4.dev: fatal: repository 'likec4.dev' does not exist
+    └  Installation failed
+    ■  Canceled
+    """
+    let summary = TerminalLog.failureSummary(raw)
+    #expect(summary == "Failed to clone likec4.dev: fatal: repository 'likec4.dev' does not exist")
+    #expect(TerminalLog.failureSummary("all good\nInstalled 3 skills\nDone!") == nil)
+}
+
+@Test func terminalLogFoldsConsecutiveDuplicateLines() {
+    // `experimental_install` echoes the same install path once per target agent (≈17×). Fold to one.
+    let raw = "✓ angular-di (copied)\n→ /skills/angular-di\n→ /skills/angular-di\n→ /skills/angular-di\n"
+    let cleaned = TerminalLog.clean(raw)
+    #expect(cleaned.components(separatedBy: "→ /skills/angular-di").count - 1 == 1)
+    #expect(cleaned.contains("✓ angular-di (copied)"))
 }

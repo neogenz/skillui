@@ -19,6 +19,28 @@ struct LockEntry: Sendable, Equatable {
     var skillFolderHash: String? = nil // git tree SHA (v3 global) — updatable
     var computedHash: String? = nil    // sha256 of contents (v1 project)
     var pluginName: String? = nil
+
+    /// The package argument `skills add` clones — an explicit `sourceURL` wins (same precedence as
+    /// `isBlockedSource`, so the classification and the install never disagree), else `source`
+    /// (owner/repo or URL). NOT `githubURL`: that helper returns `https://github.com/likec4.dev` for a
+    /// bare domain, which would reintroduce the exact "tried to clone a non-repo" failure this prevents.
+    var installPackage: String? {
+        if let u = sourceURL?.trimmingCharacters(in: .whitespaces), !u.isEmpty { return u }
+        if let s = source?.trimmingCharacters(in: .whitespaces), !s.isEmpty { return s }
+        return nil
+    }
+
+    /// Tight blocklist: marked blocked only when we're confident the source isn't a cloneable git
+    /// repo, so an exotic-but-real source is still attempted (and fails loudly in its own isolated
+    /// `skills add`) rather than silently skipped. `likec4.dev` (dotted, no slash/scheme/`.git`, no
+    /// `git@`, no explicit URL) → blocked; `owner/repo`, any URL, `*.git`, `git@host:repo` → installable.
+    var isBlockedSource: Bool {
+        guard installPackage != nil else { return true }                    // nothing to clone
+        if let u = sourceURL?.trimmingCharacters(in: .whitespaces), !u.isEmpty { return false }
+        let s = source?.trimmingCharacters(in: .whitespaces) ?? ""          // here installPackage == source
+        if s.hasPrefix("git@") { return false }                            // scp-style SSH, e.g. git@host:repo
+        return s.contains(".") && !s.contains("/") && !s.contains("://") && !s.hasSuffix(".git")
+    }
 }
 
 /// Update state for a skill, surfaced as a badge in the UI.

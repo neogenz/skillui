@@ -147,7 +147,7 @@ struct UpdateActivityView: View {
                 detailHeader(item)
                 if item.status == .warning {
                     Divider()
-                    attentionPanel()
+                    attentionPanel(forBlocked: item.isBlockedNotice)
                 }
                 Divider()
                 logPane(item)
@@ -191,22 +191,34 @@ struct UpdateActivityView: View {
         .padding(14)
     }
 
-    private func attentionPanel() -> some View {
+    @ViewBuilder private func attentionPanel(forBlocked: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Theme.statusWarn)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Verification still found update rows.")
-                    .font(.system(size: 12.5, weight: .semibold))
-                Text("The CLI command finished. Check the remaining rows in Dashboard, retry one row once, then copy this log if it stays listed.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if forBlocked {
+                    // A non-git lockfile source: reinstalling can't fix it, so don't tell the user to retry.
+                    Text("This skill can't be auto-installed.")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Text("Its lockfile source isn't a git repository, so there's nothing to clone. Remove it from skills-lock.json or point it at a git repo.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Verification still found update rows.")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Text("The CLI command finished. Check the remaining rows in Dashboard, retry one row once, then copy this log if it stays listed.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 12)
-            Button("Open Dashboard") { openWindow(id: "dashboard") }
-                .controlSize(.small)
+            if !forBlocked {
+                Button("Open Dashboard") { openWindow(id: "dashboard") }
+                    .controlSize(.small)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

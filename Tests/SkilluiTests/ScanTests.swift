@@ -72,6 +72,41 @@ private func tempDir() throws -> URL {
     #expect(AppState.computeWorktreeGaps(projects: [proj.path], installed: [alpha, beta]).isEmpty)
 }
 
+@Test func lockEntryClassifiesCloneableVsBlockedSources() {
+    // Blocked only when confidently not a git repo (bare dotted token, no slash/scheme/.git, no URL).
+    #expect(LockEntry(source: "likec4.dev").isBlockedSource == true)
+    #expect(LockEntry(source: "likec4.dev").installPackage == "likec4.dev")
+    // Every cloneable shape stays installable.
+    #expect(LockEntry(source: "owner/repo").isBlockedSource == false)
+    #expect(LockEntry(source: "repo.git").isBlockedSource == false)
+    #expect(LockEntry(source: "git@github.com:owner/repo").isBlockedSource == false)
+    #expect(LockEntry(source: "git@host.com:repo").isBlockedSource == false)   // scp-style, no slash
+    #expect(LockEntry(source: "host.com/owner/repo").isBlockedSource == false)
+    // An explicit clone URL always wins for BOTH the classification and the package to clone.
+    #expect(LockEntry(source: "likec4.dev", sourceURL: "https://github.com/o/r.git").isBlockedSource == false)
+    #expect(LockEntry(source: "likec4.dev", sourceURL: "https://github.com/o/r.git").installPackage == "https://github.com/o/r.git")
+    #expect(LockEntry(sourceURL: "https://github.com/o/r.git").isBlockedSource == false)
+    #expect(LockEntry(sourceURL: "https://github.com/o/r.git").installPackage == "https://github.com/o/r.git")
+    // No source recorded at all → blocked, nothing to clone.
+    #expect(LockEntry().isBlockedSource == true)
+    #expect(LockEntry().installPackage == nil)
+}
+
+@Test func worktreeGapSplitsInstallableAndBlockedSources() throws {
+    let proj = try tempDir()
+    // alpha = git repo, beta = non-git domain, gamma = no source recorded.
+    try Data("{\"skills\":{\"alpha\":{\"source\":\"owner/repo\"},\"beta\":{\"source\":\"likec4.dev\"},\"gamma\":{}}}".utf8)
+        .write(to: proj.appendingPathComponent("skills-lock.json"))
+    let gaps = AppState.computeWorktreeGaps(projects: [proj.path], installed: [])
+    let gap = try #require(gaps.first)
+    #expect(gap.missing == ["alpha", "beta", "gamma"])      // back-compat: every missing name
+    #expect(gap.installable.map(\.name) == ["alpha"])        // only the cloneable git source
+    #expect(gap.blocked.map(\.name) == ["beta", "gamma"])    // non-git domain + no-source
+    #expect(gap.blocked.first?.blockedReason.contains("likec4.dev") == true)
+    #expect(gap.blocked.last?.blockedReason == "no source recorded in the lockfile")
+    #expect(gap.expected == 3)
+}
+
 @Test func linkClassifierDistinguishesLocalLinkedExternal() throws {
     let fm = FileManager.default
     let base = try tempDir()

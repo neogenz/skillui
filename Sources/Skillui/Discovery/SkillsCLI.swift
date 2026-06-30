@@ -99,12 +99,38 @@ struct SkillsCLI: Sendable {
         return r.combinedString
     }
 
+    /// `skills add <package> -s <skill…> -y` in `cwd` — installs specific skills from one source into
+    /// the project. Used to converge a worktree whose lockfile mixes cloneable and non-git sources:
+    /// running one `add` per source means a bad source (`likec4.dev`) fails alone (its own non-zero
+    /// process) instead of aborting the whole `experimental_install` batch. No `-a` (defaults to the
+    /// universal agent set, landing in `.agents/skills` exactly like `experimental_install`); no `-g`
+    /// (project scope is the default). `-s` is space-separated and variadic. Mutating; user action only.
+    @discardableResult
+    func addSkills(package: String, skills: [String], cwd: String,
+                   onOutput: (@Sendable (String) -> Void)? = nil) async throws -> String {
+        let args = baseArgs + ["add", package, "-s"] + skills + ["-y"]
+        let r: ProcessResult
+        if let onOutput {
+            r = await ProcessRunner.runStreaming(launchPath: launchPath, args: args, cwd: cwd,
+                                                 extraEnv: extraEnv, onOutput: onOutput)
+        } else {
+            r = await ProcessRunner.run(launchPath: launchPath, args: args,
+                                        cwd: cwd, extraEnv: extraEnv, dropStderr: false)
+        }
+        guard r.status == 0 else { throw CLIError.nonZero(r.status, r.combinedString) }
+        return r.combinedString
+    }
+
     func updateCommand(name: String, scope: Scope, cwd: String? = nil) -> String {
         Self.describe(invocation + ["update", name, scope.cliFlag, "-y"], cwd: cwd)
     }
 
     func installFromLockCommand(cwd: String) -> String {
         Self.describe(invocation + ["experimental_install", "-y"], cwd: cwd)
+    }
+
+    func addSkillsCommand(package: String, skills: [String], cwd: String) -> String {
+        Self.describe(invocation + ["add", package, "-s"] + skills + ["-y"], cwd: cwd)
     }
 
     /// Tolerate stray bytes around the JSON (e.g. a one-time npx install notice).
