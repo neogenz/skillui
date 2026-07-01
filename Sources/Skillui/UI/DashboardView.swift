@@ -323,15 +323,15 @@ struct DashboardView: View {
                 ToolbarItem(placement: .navigation) {
                     // One control that shows its own progress — a bare ProgressView as a second
                     // toolbar item gets its own awkwardly-padded glass capsule on macOS 26.
-                    Button { Task { await app.rescanProjects() } } label: {
-                        if app.isScanningProjects {
+                    Button { Task { await app.refresh(force: true) } } label: {
+                        if app.isScanning || app.isScanningProjects {
                             ProgressView().controlSize(.small)
                         } else {
                             Label("Rescan", systemImage: "arrow.clockwise")
                         }
                     }
-                    .disabled(app.isScanningProjects)
-                    .help("Rescan \(rootLabel)")
+                    .disabled(app.isScanning || app.isScanningProjects)
+                    .help("Refresh global skills + rescan \(rootLabel)")
                 }
                 if app.updateActivity != nil {
                     ToolbarItem(placement: .navigation) {

@@ -4,6 +4,18 @@ All notable changes to Skillui are documented here. Keep the newest release firs
 
 ## Unreleased
 
+## v0.1.0-beta.5
+
+Fix stale global skills lingering in the dashboard after they're removed or updated.
+
+### Fixed
+
+- The dashboard's Rescan button now runs a full refresh — re-scanning global skills as well as
+  the project tree — instead of only rescanning projects. Previously the global list was loaded
+  once at launch and never refreshed from the dashboard window, so a globally removed or updated
+  skill kept showing in the Updates view until the app was relaunched. The button's progress
+  spinner and disabled state now track both scans.
+
 ## v0.1.0-beta.4
 
 Dashboard install experience: a project-scoped install flow, readable activity logs, and honest
