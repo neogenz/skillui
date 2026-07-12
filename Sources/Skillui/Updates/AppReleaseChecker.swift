@@ -27,13 +27,16 @@ struct AppReleaseChecker: Sendable {
     }
 
     func latestUpdate(currentVersion: String) async throws -> AppRelease? {
-        let release = try await latestRelease()
+        let release = try await latestRelease(currentVersion: currentVersion)
         return Self.compareVersions(release.version, currentVersion) == .orderedDescending ? release : nil
     }
 
-    private func latestRelease() async throws -> AppRelease {
+    private func latestRelease(currentVersion: String) async throws -> AppRelease {
         guard repository.split(separator: "/").count == 2 else { throw ReleaseError.invalidRepository }
-        let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+        // GitHub's /releases/latest excludes prereleases; beta builds need the releases list.
+        let isPrereleaseBuild = currentVersion.contains("-")
+        let endpoint = isPrereleaseBuild ? "releases?per_page=100" : "releases/latest"
+        let url = URL(string: "https://api.github.com/repos/\(repository)/\(endpoint)")!
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
@@ -45,7 +48,16 @@ struct AppReleaseChecker: Sendable {
         guard let http = response as? HTTPURLResponse else { throw ReleaseError.noResponse }
         guard http.statusCode == 200 else { throw ReleaseError.http(http.statusCode) }
 
-        let gh = try JSONDecoder().decode(GitHubRelease.self, from: data)
+        let gh: GitHubRelease
+        if isPrereleaseBuild {
+            let releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
+            guard let firstPublished = releases.first(where: { !$0.draft }) else {
+                throw ReleaseError.http(404)
+            }
+            gh = firstPublished
+        } else {
+            gh = try JSONDecoder().decode(GitHubRelease.self, from: data)
+        }
         guard let asset = gh.assets.first(where: { Self.isDMGAssetName($0.name) }) else {
             throw ReleaseError.noDMGAsset
         }
@@ -64,6 +76,7 @@ struct AppReleaseChecker: Sendable {
         let name: String?
         let body: String?
         let htmlURL: String
+        let draft: Bool
         let assets: [GitHubAsset]
 
         enum CodingKeys: String, CodingKey {
@@ -71,6 +84,7 @@ struct AppReleaseChecker: Sendable {
             case name
             case body
             case htmlURL = "html_url"
+            case draft
             case assets
         }
     }

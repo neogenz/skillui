@@ -142,6 +142,6 @@ Do not run both paths for the same tag.
 
 ## Update Flow
 
-The app checks `https://api.github.com/repos/<owner>/<repo>/releases/latest`. If the latest stable release is newer than `CFBundleShortVersionString`, Skillui shows a native Software Update window with the GitHub release notes and downloads the `.dmg` asset to Downloads.
+The app checks `https://api.github.com/repos/<owner>/<repo>/releases/latest` for stable builds and the releases list for prerelease builds. If the latest release in the current channel is newer than `CFBundleShortVersionString`, Skillui shows a native Software Update window with the GitHub release notes and downloads the `.dmg` asset to Downloads.
 
 This is not silent self-replacement. Users still mount the DMG and replace the app, which keeps the project system-framework-only.
