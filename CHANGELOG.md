@@ -4,6 +4,15 @@ All notable changes to Skillui are documented here. Keep the newest release firs
 
 ## Unreleased
 
+## v0.1.0-beta.6
+
+Application update checks now work for beta builds.
+
+### Fixed
+
+- Beta builds no longer report that no GitHub release exists when the repository only has
+  published pre-releases.
+
 ## v0.1.0-beta.5
 
 Fix stale global skills lingering in the dashboard after they're removed or updated.
