@@ -1,76 +1,148 @@
 # Skillui
 
-A macOS menu-bar app that gives you one unified, cross-agent view of every
-[skills.sh](https://skills.sh) skill you've installed — across Claude Code, Codex,
-Cursor, and ~20 other agents — and tells you which ones have an upstream update.
+**Keep every [`skills.sh`](https://skills.sh) install visible and up to date—across coding agents,
+projects, and Git worktrees.**
 
-<img src="docs/panel.png" width="380" alt="Skillui panel">
+Skillui is a native macOS menu-bar app for developers who use skills across Claude Code, Codex,
+Cursor, and other compatible agents. It discovers global and project-local skills, shows where each
+copy comes from, detects upstream updates, and runs updates through the official `skills` CLI.
+
+<p align="center">
+  <a href="https://github.com/neogenz/skillui/releases"><strong>Download the latest beta</strong></a>
+  · <a href="https://github.com/neogenz/skillui/releases">Release notes</a>
+  · <a href="https://github.com/neogenz/skillui/issues">Report an issue</a>
+</p>
+
+<p align="center">
+  <img src="docs/panel.png" width="380" alt="Skillui menu-bar panel showing 50 installed skills up to date">
+</p>
+
+> [!NOTE]
+> Skillui is in public beta. It requires macOS 26 or later and Node.js (`npx`) or the `skills` CLI.
+
+## Install
+
+1. Download the newest `Skillui-*.dmg` from [GitHub Releases](https://github.com/neogenz/skillui/releases).
+2. Open the DMG and drag **Skillui** to **Applications**.
+3. Launch Skillui. It lives in the menu bar and does not add a Dock icon.
+
+Public beta DMGs are signed and notarized. Skillui checks GitHub Releases for newer versions, shows
+the release notes, and lets you download the next DMG; it never silently replaces itself.
+
+## Why Skillui?
+
+Installing an agent skill is easy. Once several agents, projects, and worktrees are involved, it
+gets harder to answer basic questions:
+
+- Which skills are installed, and in which projects?
+- Is a project using its own copy or a link to the global install?
+- Which worktrees are missing skills declared in their lockfile?
+- Which installed skills have changed upstream?
+
+Skillui answers those questions in one native utility—without an account, a database, or a service
+running in the cloud.
 
 ## What it does
 
-- **Discovers** every skill — global, plus across all your projects — via the `skills` CLI (the
-  menu-bar panel) and a recursive dev-folder scan (the dashboard).
-- **Detects updates** by comparing global lock tree-SHAs against GitHub; project-local root
-  `SKILL.md` locks are checked with the same single-file hash as the `skills` CLI.
-- **Updates in one click** (`skills update`), with an "Update all".
-- **Dashboard window**: every skill across every project in a sortable, filterable table, each tagged
-  **Local / Linked / Global / External** so you see at a glance whether a project's skill is its own
-  copy or a symlink into the global install. Git worktrees are grouped under their main repo
-  (`repo › worktree`). Filter by project, scope, link type, or pending updates.
-- **Links out** — click a row for its skills.sh page, the glyph for its GitHub repo.
-- Lives in the menu bar (no Dock icon), launches at login, refreshes in the background.
+- **Discovers global and project skills.** The menu-bar panel reads the `skills` CLI; the dashboard
+  recursively scans your development folders.
+- **Explains provenance.** Every dashboard row is tagged **Local**, **Linked**, **Global**, or
+  **External**, so you can see whether a project owns a copy or links to another install.
+- **Detects upstream updates.** Global and supported project-local skills are compared with their
+  GitHub source without mutating the install.
+- **Updates on demand.** Update one skill, update all, or install skills missing from a project or
+  worktree through the `skills` CLI.
+- **Understands Git worktrees.** Related worktrees are grouped below their main repository and can be
+  filtered together.
+- **Links to the source.** Open a skill on skills.sh or jump to its GitHub repository from the app.
+- **Stays out of the way.** No Dock icon, optional launch at login, background refresh, and native
+  light and dark modes.
 
-**Privacy**: the project scan only looks in dev folders (`~/workspace`, `~/Developer`, `~/code`, …) and
-**never touches Documents, Desktop, Downloads, Music, Pictures**, or other protected folders — so it
-won't set off macOS privacy prompts. Point it at a custom root in Settings if your code lives elsewhere.
+## Privacy and local data
 
-No account, no database, no third-party dependencies. The only thing it persists is a
-small JSON update-cache (so badges survive relaunch and GitHub isn't hammered).
+Skillui scans development roots such as `~/workspace`, `~/Developer`, and `~/code`. It deliberately
+excludes macOS personal and protected folders, including Documents, Desktop, Downloads, Music,
+Pictures, Movies, and Library. You can choose a custom development root in Settings.
+
+There is no account and no database. The app uses system frameworks only and stores:
+
+- preferences in UserDefaults;
+- an optional GitHub personal access token in Keychain;
+- a small local JSON cache for GitHub update checks.
+
+Discovery works offline. GitHub access is used for upstream update badges and application release
+checks; skill installs and updates run only after an explicit action.
 
 ## Requirements
 
-- macOS 26+ (SwiftUI Liquid Glass baseline)
-- Node (`npx`) on your login shell, or the `skills` binary — Skillui resolves it for you.
-- Optional: a GitHub PAT (Settings) to raise the update-check rate limit 60 → 5000/hr.
+- macOS 26 or later (the SwiftUI Liquid Glass baseline);
+- Node.js with `npx` available from your login shell, or the `skills` binary;
+- optional: a GitHub personal access token in Settings to raise the update-check limit from 60 to
+  5,000 requests per hour.
 
-## Build & run
+## Build from source
+
+Skillui uses Swift 6, SwiftUI, and Swift Package Manager with no third-party package dependencies.
 
 ```bash
-scripts/build-app.sh        # release build → dist/Skillui.app (Developer ID if available)
+swift test
+scripts/build-app.sh release
 open dist/Skillui.app
 ```
 
-Dev verification hooks (headless, no GUI):
+The application bundle is required for the menu-bar and launch-at-login features. Running the bare
+SwiftPM executable is useful only for the headless development hooks below.
+
+### Headless development hooks
 
 ```bash
-.build/debug/Skillui --scan-dump --check          # global+manual discovery + update status
-.build/debug/Skillui --scan-projects [root] --check   # recursive multi-project scan + status
-.build/debug/Skillui --render-png panel.png       # rasterize the panel to a PNG
-.build/debug/Skillui --dashboard                  # launch with the dashboard window open
+.build/debug/Skillui --scan-dump --check
+.build/debug/Skillui --scan-projects [root] --check
+.build/debug/Skillui --render-png panel.png
+.build/debug/Skillui --dashboard
 ```
 
-## Package a DMG
+### Package a DMG
 
 ```bash
-scripts/make-dmg.sh                          # ad-hoc dist/Skillui-<version>.dmg
+scripts/make-dmg.sh
+
 DEVELOPER_ID="Developer ID Application: …" \
-NOTARY_PROFILE="skillui-notary" scripts/make-dmg.sh   # signed + notarized
+NOTARY_PROFILE="skillui-notary" \
+scripts/make-dmg.sh
 ```
 
-> Not App Store: Skillui shells out to a CLI and reads arbitrary paths, which the
-> sandbox forbids. Distribution is via signed + notarized DMG.
+Skillui is not distributed through the Mac App Store: it shells out to the `skills` CLI and reads
+user-selected development paths, which are incompatible with the App Sandbox.
 
-## App updates
+## How update detection works
 
-Skillui checks GitHub Releases for newer signed DMGs. Use **Check for Updates...** from the app menu,
-Settings, or the menu-bar panel footer. When an update exists, Skillui shows a native Software Update
-window with the release notes, then downloads and opens the DMG.
+Verified against `skills` CLI v1.5.13:
 
-This stays system-framework-only: Skillui does not silently replace itself. The release repository is
-compiled into `Info.plist` via `SkilluiReleaseRepository` and can be overridden during builds with
-`SKILLUI_RELEASE_REPO=owner/repo`.
+| Concern | How Skillui handles it |
+| --- | --- |
+| Discovery | Runs `skills list -g\|-p --json` for global and project scopes, then joins results to their lockfiles. |
+| Provenance | Reads the global `~/.agents/.skill-lock.json` and each project `skills-lock.json`, then classifies the on-disk path. |
+| Global update check | Compares the locked `skillFolderHash` with the matching folder tree SHA from GitHub. |
+| Project update check | For supported root `SKILL.md` installs, compares the lockfile `computedHash` with the same single-file hash used by the CLI. |
+| Cross-agent display | Shows one shared skill once, with its compatible agents attached, instead of duplicating the row. |
 
-## Release process
+Update checks are grouped by repository, cached with ETags and a six-hour TTL, and never invoke
+`skills update`. Mutating commands run only when you choose an update or install action.
+
+## Current limitations
+
+- Complex project v1 locks do not expose a reliable upstream hash. Skillui leaves them without an
+  update badge rather than reporting a false update.
+- Skills without a known Git source are shown as **Untracked** and are not offered a misleading
+  install or update action.
+- The recursive project scan runs in the background, so global skills appear first.
+- Application updates open a downloaded DMG; they are not silent in-place updates.
+
+## Contributing and releases
+
+Bug reports and focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+opening a pull request, and report security issues through [SECURITY.md](SECURITY.md).
 
 Releases are tag-driven:
 
@@ -80,24 +152,10 @@ git tag -a v0.1.0 -m "Skillui 0.1.0"
 git push origin v0.1.0
 ```
 
-The GitHub workflow runs tests, builds a DMG, notarizes it, extracts the matching `CHANGELOG.md`
-section, and uploads the DMG plus `.sha256` checksum to GitHub Releases. See [docs/release.md](docs/release.md).
+The GitHub workflow runs the tests, builds and notarizes the DMG, extracts the matching
+[CHANGELOG.md](CHANGELOG.md) section, and uploads the DMG with its SHA-256 checksum. See
+[docs/release.md](docs/release.md) for the complete release process.
 
-## How it works (verified against `skills` CLI v1.5.13)
+## License
 
-| Concern | Reality |
-|---------|---------|
-| Discovery | `skills list -g\|-p --json` → `[{name, path, scope, agents[]}]`. Default scope is project; Skillui queries both. |
-| Provenance | Global lock `~/.agents/.skill-lock.json` (rich, has `skillFolderHash` = git tree SHA). Project lock `<root>/skills-lock.json` (lean, `computedHash`). Joined to the list **by name**. |
-| Update check | Global locks: `GET /repos/{repo}/git/trees/{defaultBranch}?recursive=1`, compare the folder tree SHA to `skillFolderHash`. Project v1 root `SKILL.md` locks: fetch the upstream file and hash `SKILL.md + contents` to match the CLI's `computedHash`. |
-| Cross-agent | A skill in the shared `.agents/skills` dir belongs to many agents at once — shown as agent chips on a single row, never duplicated. |
-
-## Limitations (MVP)
-
-- Update detection: global skills compare the lockfile's git tree-SHA; project-local root
-  `SKILL.md` skills compare the lockfile's CLI hash to the upstream file hash. More complex
-  project v1 locks do not have a reliable upstream hash, so Skillui does not show false update
-  badges for them. Skills not installed from a known source still show as *untracked*.
-- The multi-project scan runs in the background; globals show first.
-- The GitHub PAT lives in the Keychain; everything else is UserDefaults.
-- Application self-update is a GitHub Releases DMG prompt, not a silent in-place updater.
+[MIT](LICENSE)
