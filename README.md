@@ -14,7 +14,7 @@ copy comes from, detects upstream updates, and runs updates through the official
 </p>
 
 <p align="center">
-  <img src="docs/panel.png" width="380" alt="Skillui menu-bar panel showing 50 installed skills up to date">
+  <img src="assets/AppIcon.png" width="128" alt="Skillui app icon">
 </p>
 
 > [!NOTE]
