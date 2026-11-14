@@ -27,6 +27,7 @@ struct SkillRowView: View {
                         Text("untracked").font(.system(size: 10)).foregroundStyle(.tertiary)
                     }
                     AgentChips(agents: skill.agents)
+                    ProfileChips(profiles: skill.profiles, allProfiles: app.claudeProfiles, showShared: false)
                 }
             }
             Spacer(minLength: 6)

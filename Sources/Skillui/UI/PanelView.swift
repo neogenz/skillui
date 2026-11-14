@@ -110,7 +110,7 @@ struct PanelView: View {
                 CaughtUpBanner()
             }
             ForEach(sections(excluding: updatable)) { sec in
-                SectionView(scope: sec.scope, tracked: sec.tracked, untracked: sec.untracked)
+                SectionView(title: sec.title, tracked: sec.tracked, untracked: sec.untracked)
             }
         }
         .padding(Theme.Spacing.lg)
@@ -168,10 +168,10 @@ struct PanelView: View {
     // MARK: Sections
 
     private struct PanelSection: Identifiable {
-        let scope: Scope
+        let title: String
         let tracked: [Skill]
         let untracked: [Skill]
-        var id: String { scope.rawValue }
+        var id: String { title }
     }
 
     /// Skills with an update ready — surfaced in a single group at the top so the one
@@ -187,12 +187,26 @@ struct PanelView: View {
 
     private func sections(excluding updatable: [Skill]) -> [PanelSection] {
         let updatableIDs = Set(updatable.map(\.id))
-        return Scope.allCases.compactMap { scope in
+        let profileCount = app.claudeProfiles.count
+        var groups: [(String, [Skill])] = []
+        for scope in Scope.allCases {
             let inScope = app.visibleSkills.filter { $0.scope == scope && !updatableIDs.contains($0.id) }
-            guard !inScope.isEmpty else { return nil }
-            let tracked = inScope.filter { $0.isTracked }.sorted { rank($0) < rank($1) }
-            let untracked = inScope.filter { !$0.isTracked }
-            return PanelSection(scope: scope, tracked: tracked, untracked: untracked)
+            // With several Claude profiles, split globals: shared by all vs. owned by some.
+            if scope == .global && profileCount > 1 {
+                let shared = inScope.filter { $0.profiles.count == profileCount }
+                let specific = inScope.filter { !$0.profiles.isEmpty && $0.profiles.count < profileCount }
+                let other = inScope.filter { $0.profiles.isEmpty }
+                groups += [("Shared · all profiles", shared), ("Profile-specific", specific),
+                           ("\(scope.label) · other agents", other)]
+            } else {
+                groups.append((scope.label, inScope))
+            }
+        }
+        return groups.compactMap { title, skills in
+            guard !skills.isEmpty else { return nil }
+            let tracked = skills.filter { $0.isTracked }.sorted { rank($0) < rank($1) }
+            let untracked = skills.filter { !$0.isTracked }
+            return PanelSection(title: title, tracked: tracked, untracked: untracked)
         }
     }
 
@@ -255,7 +269,7 @@ private struct CaughtUpBanner: View {
 
 /// One scope group: a titled card with tracked rows + a collapsible "Untracked" list.
 private struct SectionView: View {
-    let scope: Scope
+    let title: String
     let tracked: [Skill]
     let untracked: [Skill]
     @Environment(AppState.self) private var app
@@ -263,7 +277,7 @@ private struct SectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(scope.label.uppercased())
+            Text(title.uppercased())
                 .font(.system(size: 10, weight: .bold)).tracking(0.5)
                 .foregroundStyle(.secondary).padding(.horizontal, 4)
 

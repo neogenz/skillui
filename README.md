@@ -117,7 +117,7 @@ user-selected development paths, which are incompatible with the App Sandbox.
 
 ## How update detection works
 
-Verified against `skills` CLI v1.5.13:
+Verified against `skills` CLI v1.5.13 (list/lock shape re-checked on v1.8.1):
 
 | Concern | How Skillui handles it |
 | --- | --- |

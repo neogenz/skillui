@@ -67,8 +67,10 @@ enum DebugCLI {
             }
             print("CLI: \(invocation.argv.joined(separator: " "))")
             let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath), projectRoots: [])
-            let outcome = await scanner.scan()
-            print("skills: \(outcome.skills.count)  error: \(outcome.error ?? "none")\n")
+            var outcome = await scanner.scan()
+            let profiles = ClaudeProfiles.discover()
+            outcome.skills = ClaudeProfiles.merge(outcome.skills, profiles: profiles)
+            print("skills: \(outcome.skills.count)  error: \(outcome.error ?? "none")  profiles: \(profiles.map(\.name))\n")
 
             var statuses: [String: UpdateStatus] = [:]
             if withCheck {
@@ -78,6 +80,7 @@ enum DebugCLI {
                 let v = s.shortVersion ?? "—"
                 let src = s.source ?? "untracked"
                 var line = "  [\(s.scope.rawValue)] \(s.name)  v:\(v)  src:\(src)  folder:\(s.repoFolder ?? "-")  agents:\(s.agents.count)"
+                if !s.profiles.isEmpty { line += "  profiles:\(s.profiles.count == profiles.count ? "all" : s.profiles.joined(separator: ","))" }
                 if let st = statuses[s.id] { line += "  → \(st)" }
                 print(line)
             }

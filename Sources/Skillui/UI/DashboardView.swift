@@ -377,6 +377,12 @@ struct DashboardView: View {
 
             TableColumn("Link") { s in LinkBadge(type: s.linkType) }.width(92)
 
+            if !app.claudeProfiles.isEmpty {
+                TableColumn("Profiles") { s in
+                    ProfileChips(profiles: s.profiles, allProfiles: app.claudeProfiles, glass: false)
+                }.width(min: 90, ideal: 150)
+            }
+
             if projectColumn != .hidden {
                 TableColumn(projectColumn == .worktree ? "Worktree" : "Project") { s in
                     projectCell(s, mode: projectColumn)
@@ -617,6 +623,7 @@ struct DashboardView: View {
                 $0.name.localizedCaseInsensitiveContains(search)
                     || ($0.source?.localizedCaseInsensitiveContains(search) ?? false)
                     || ($0.projectLabel?.localizedCaseInsensitiveContains(search) ?? false)
+                    || $0.profiles.contains { $0.localizedCaseInsensitiveContains(search) }
             }
         }
         return r.sorted(using: sortOrder)

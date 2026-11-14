@@ -9,6 +9,8 @@ import Observation
 @Observable
 final class AppState {
     var skills: [Skill] = []
+    /// Claude profile names when more than one exists (else empty → profile chips hidden).
+    var claudeProfiles: [String] = []
     var statuses: [String: UpdateStatus] = [:]   // skill.id → status
     var isScanning = false
     var isCheckingUpdates = false
@@ -533,7 +535,9 @@ final class AppState {
         let scanner = SkillScanner(cli: SkillsCLI(invocation: invocation.argv, loginPath: invocation.loginPath),
                                    projectRoots: projectRoots, globalRoots: globalRoots)
         let outcome = await scanner.scan()
-        skills = outcome.skills.sorted(by: Self.order)
+        let profiles = await Task.detached(priority: .utility) { ClaudeProfiles.discover() }.value
+        claudeProfiles = profiles.count > 1 ? profiles.map(\.name) : []
+        skills = ClaudeProfiles.merge(outcome.skills, profiles: profiles).sorted(by: Self.order)
         lastError = outcome.error
 
         // Prune statuses for skills that disappeared. `statuses` is SHARED with the dashboard's

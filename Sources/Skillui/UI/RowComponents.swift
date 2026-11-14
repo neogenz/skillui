@@ -111,3 +111,41 @@ struct StateMessage: View {
         .frame(maxWidth: .infinity).padding(.horizontal, 24).padding(.vertical, 54)
     }
 }
+
+/// Which Claude profiles hold a global skill: one "all profiles" pill when shared everywhere,
+/// else one pill per profile that has it. Hidden when there's a single profile.
+struct ProfileChips: View {
+    let profiles: [String]
+    let allProfiles: [String]
+    var glass = true
+    /// Panel sections already say "shared"; repeating the pill on every row is noise.
+    var showShared = true
+
+    var body: some View {
+        if !allProfiles.isEmpty && !profiles.isEmpty {
+            if profiles.count == allProfiles.count {
+                if showShared {
+                pill("all profiles", systemImage: "person.2.fill",
+                     help: "Shared by every Claude profile: \(allProfiles.joined(separator: ", "))")
+                }
+            } else {
+                HStack(spacing: 3) {
+                    ForEach(profiles, id: \.self) { p in
+                        pill(p, systemImage: "person.fill",
+                             help: "Only in Claude profile(s): \(profiles.joined(separator: ", "))")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func pill(_ title: String, systemImage: String, help: String) -> some View {
+        let label = Label(title, systemImage: systemImage)
+            .labelStyle(.titleAndIcon)
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .help(help)
+        if glass { label.chipSurface() } else { label.background(.fill.quaternary, in: Capsule()) }
+    }
+}

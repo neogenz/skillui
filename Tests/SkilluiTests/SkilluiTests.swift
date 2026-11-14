@@ -274,3 +274,36 @@ private func writeTempLock(_ json: String) throws -> URL {
     #expect(cleaned.components(separatedBy: "→ /skills/angular-di").count - 1 == 1)
     #expect(cleaned.contains("✓ angular-di (copied)"))
 }
+
+@Test func listFailureSurfacesFirstStderrLine() async {
+    // `sh -c <script> list -g --json`: extra args become $0.., the script fails like a broken node.
+    let cli = SkillsCLI(invocation: ["/bin/sh", "-c", "echo 'Library not loaded: libfoo' >&2; echo detail >&2; exit 6"])
+    do {
+        _ = try await cli.list(scope: .global)
+        Issue.record("expected failure")
+    } catch {
+        #expect(error.localizedDescription == "skills CLI exited 6: Library not loaded: libfoo")
+    }
+}
+
+@Test func claudeProfilesTagSharedAndAddProfileOnlySkills() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent("profiles-\(UUID().uuidString)").path
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    func add(_ dir: String, _ skill: String) throws {
+        let d = "\(home)/\(dir)/skills/\(skill)"
+        try FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: "\(d)/SKILL.md", contents: Data())
+    }
+    try add(".claude", "shared"); try add(".claude-work", "shared")
+    try add(".claude-work", "work-only")
+    try FileManager.default.createDirectory(atPath: "\(home)/.claude/skills/.trash", withIntermediateDirectories: true)
+
+    let profiles = ClaudeProfiles.discover(home: home)
+    #expect(profiles.map(\.name) == ["default", "work"])
+    let global = Skill(name: "shared", path: "/x/shared", scope: .global, agents: ["Claude Code"], projectPath: nil)
+    let merged = ClaudeProfiles.merge([global], profiles: profiles)
+    #expect(merged.first { $0.name == "shared" }?.profiles == ["default", "work"])
+    let only = try #require(merged.first { $0.name == "work-only" })
+    #expect(only.profiles == ["work"] && !only.isTracked)
+    #expect(merged.count == 2)
+}

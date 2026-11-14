@@ -66,6 +66,7 @@ struct Skill: Identifiable, Sendable, Equatable {
     var projectGroup: String? = nil    // main repo name (worktrees grouped under it); nil for global
     var isWorktree: Bool = false       // project is a git worktree of `projectGroup`
     var localFileCount: Int? = nil     // files in the install folder; gates single-file root checks (nil = unknown)
+    var profiles: [String] = []        // Claude profiles holding this global skill (empty = single profile / n/a)
 
     var id: String { "\(scope.rawValue)|\(projectPath ?? "~")|\(name)|\(path)" }
 

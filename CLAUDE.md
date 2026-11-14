@@ -42,6 +42,11 @@ These exit before the GUI starts (see `System/DebugCLI.swift`, `System/RenderCLI
 - **Dashboard** path = filesystem-driven: `ProjectFinder` recursively finds project dirs under the
   scan root; `FilesystemScanner` enumerates each project's skill dirs; `LinkClassifier` stats them
   for symlink info the CLI doesn't expose; `GitInfo` detects git worktrees.
+- **Claude profiles**: `ClaudeProfiles` reads `~/.claude/skills` ("default") and each `~/.claude-<name>/skills`
+  (multi-account launchers) from disk — the CLI only knows `~/.claude`. Global skills are tagged with the
+  profiles holding them; profile-only skills are added untracked (`skills update -g` never reaches them).
+- **Node**: the login shell (no nvm) usually resolves Homebrew `npx`/`node`. If Homebrew breaks node
+  (e.g. a dylib bump), the CLI aborts — the error now surfaces stderr's first line; fix with `brew upgrade node`.
 
 `Updates/` compares folder tree SHAs against GitHub. `System/AppState.swift` (`@MainActor @Observable`)
 coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `DashboardView` (window).
@@ -68,7 +73,7 @@ coordinates scans, update checks, settings. `UI/` = `PanelView` (menu bar) + `Da
   macOS TCC-protected/personal dirs (Documents, Desktop, Downloads, Music, Pictures, Movies, Library) so
   the app never lists their contents → no privacy prompts. Never widen this without reason.
 
-## Verified data layer (do NOT re-derive — confirmed against `skills` CLI v1.5.13)
+## Verified data layer (do NOT re-derive — confirmed against `skills` CLI v1.5.13; list/lock shape re-checked on v1.8.1)
 
 - **No bare `skills` binary** here; invoke via `npx skills`. GUI apps don't inherit the shell PATH,
   so resolve binaries through a login shell (`ShellEnvironment`).
