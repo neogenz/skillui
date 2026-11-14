@@ -68,6 +68,8 @@ struct AgentChips: View {
             .labelStyle(.titleAndIcon)
             .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 7).padding(.vertical, 2)
             .help(agents.joined(separator: ", "))
         if glass {
@@ -129,12 +131,9 @@ struct ProfileChips: View {
                      help: "Shared by every Claude profile: \(allProfiles.joined(separator: ", "))")
                 }
             } else {
-                HStack(spacing: 3) {
-                    ForEach(profiles, id: \.self) { p in
-                        pill(p, systemImage: "person.fill",
-                             help: "Only in Claude profile(s): \(profiles.joined(separator: ", "))")
-                    }
-                }
+                // One pill, never squeezed: a narrow panel row otherwise wraps names letter by letter.
+                pill(profiles.joined(separator: " · "), systemImage: "person.fill",
+                     help: "Only in Claude profile(s): \(profiles.joined(separator: ", "))")
             }
         }
     }
@@ -144,6 +143,8 @@ struct ProfileChips: View {
             .labelStyle(.titleAndIcon)
             .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 7).padding(.vertical, 2)
             .help(help)
         if glass { label.chipSurface() } else { label.background(.fill.quaternary, in: Capsule()) }
