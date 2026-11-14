@@ -48,7 +48,12 @@ struct SkillsCLI: Sendable {
         let r = await ProcessRunner.run(launchPath: launchPath,
                                         args: baseArgs + ["list", scope.cliFlag, "--json"],
                                         cwd: cwd, extraEnv: extraEnv, dropStderr: true)
-        guard r.status == 0 else { throw CLIError.nonZero(r.status, r.stderrString) }
+        guard r.status == 0 else {
+            // First stderr line is the decisive one (e.g. dyld "Library not loaded" for a broken node).
+            let firstLine = r.stderrString.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+            throw CLIError.nonZero(r.status, String(firstLine.prefix(200)))
+        }
         // Clean JSON is the normal case; only fall back to slicing if that fails.
         if let skills = try? JSONDecoder().decode([CLISkill].self, from: r.stdout) { return skills }
         do { return try JSONDecoder().decode([CLISkill].self, from: Self.jsonSlice(r.stdout)) }

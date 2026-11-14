@@ -74,7 +74,13 @@ enum ProcessRunner {
                     let outPipe = Pipe()
                     p.standardOutput = outPipe
                     p.standardInput = FileHandle.nullDevice
-                    p.standardError = dropStderr ? FileHandle.nullDevice : outPipe
+                    // Separated stderr goes to a temp file, not a 2nd pipe: a full undrained pipe would deadlock.
+                    let errURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("skillui-stderr-\(UUID().uuidString)")
+                    let errHandle: FileHandle? = dropStderr && FileManager.default.createFile(atPath: errURL.path, contents: nil)
+                        ? try? FileHandle(forWritingTo: errURL) : nil
+                    defer { try? errHandle?.close(); try? FileManager.default.removeItem(at: errURL) }
+                    p.standardError = dropStderr ? (errHandle ?? FileHandle.nullDevice) : outPipe
 
                     do {
                         try p.run()
@@ -94,7 +100,8 @@ enum ProcessRunner {
                     p.waitUntilExit()
                     watchdog.cancel()
                     killBox.finish()
-                    cont.resume(returning: ProcessResult(status: p.terminationStatus, stdout: data, stderr: Data()))
+                    let errData = errHandle == nil ? Data() : ((try? Data(contentsOf: errURL)) ?? Data())
+                    cont.resume(returning: ProcessResult(status: p.terminationStatus, stdout: data, stderr: errData))
                 }
             }
         } onCancel: {
