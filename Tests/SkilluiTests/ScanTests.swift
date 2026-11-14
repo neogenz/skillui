@@ -170,6 +170,16 @@ private func tempDir() throws -> URL {
     let w = GitInfo.meta(for: wt.path)
     #expect(w.isWorktree)
     #expect(w.mainRepo == "pulpe-workspace")
+
+    // Removed worktree: no .git left, but Claude Code's `<repo>/.claude/worktrees/<name>` layout names the repo.
+    let gone = base.appendingPathComponent("pulpe-workspace/.claude/worktrees/tender")
+    try fm.createDirectory(at: gone, withIntermediateDirectories: true)
+    let g = GitInfo.meta(for: gone.path)
+    #expect(g.isRemoved && g.isWorktree && g.mainRepo == "pulpe-workspace")
+    // A plain nested dir without .git stays a standalone project.
+    let pkg = base.appendingPathComponent("pulpe-workspace/frontend")
+    try fm.createDirectory(at: pkg, withIntermediateDirectories: true)
+    #expect(!GitInfo.meta(for: pkg.path).isRemoved)
 }
 
 @Test func gitTreeHasherIsDeterministicAndDetectsChange() throws {

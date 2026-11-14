@@ -627,6 +627,8 @@ final class AppState {
         let byPath = Dictionary(grouping: installed, by: { $0.projectPath ?? "" })
         var gaps: [WorktreeGap] = []
         for path in projects {
+            let meta = GitInfo.meta(for: path)
+            guard !meta.isRemoved else { continue }   // a removed worktree's leftovers can't be "hydrated"
             let lock = LockfileParser.read(LockfileParser.projectLockURL(projectRoot: path))
             guard !lock.isEmpty else { continue }
             let have = Set((byPath[path] ?? []).map(\.name))
@@ -639,7 +641,6 @@ final class AppState {
                 }
                 .sorted { $0.name < $1.name }
             guard !missing.isEmpty else { continue }
-            let meta = GitInfo.meta(for: path)
             gaps.append(WorktreeGap(path: path, name: meta.name, group: meta.mainRepo ?? meta.name,
                                     isWorktree: meta.isWorktree, entries: missing, expected: lock.count))
         }

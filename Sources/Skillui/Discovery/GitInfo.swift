@@ -8,6 +8,7 @@ enum GitInfo {
         var name: String          // the project dir name
         var mainRepo: String?     // main repo name when this is a worktree
         var isWorktree: Bool
+        var isRemoved = false     // leftover dir of a worktree git already removed (no `.git` left)
     }
 
     static func meta(for root: String) -> Meta {
@@ -16,6 +17,17 @@ enum GitInfo {
 
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir)
+        if !exists {
+            // `git worktree remove` can leave ignored files behind (build output, skills-lock.json).
+            // Claude Code puts worktrees in `<repo>/.claude/worktrees/<name>`, so the layout names the repo.
+            let parent = (root as NSString).deletingLastPathComponent
+            let dotClaude = (parent as NSString).deletingLastPathComponent
+            if (parent as NSString).lastPathComponent == "worktrees",
+               (dotClaude as NSString).lastPathComponent == ".claude" {
+                let repo = ((dotClaude as NSString).deletingLastPathComponent as NSString).lastPathComponent
+                return Meta(name: name, mainRepo: repo, isWorktree: true, isRemoved: true)
+            }
+        }
         guard exists, !isDir.boolValue else {
             return Meta(name: name, mainRepo: nil, isWorktree: false)   // dir .git = normal repo (or none)
         }
