@@ -51,13 +51,19 @@ struct AgentChips: View {
         } else {
             HStack(spacing: 3) {
                 ForEach(agents, id: \.self) { a in
-                    let st = AgentRegistry.style(for: a)
-                    Image(systemName: st.symbol)
-                        .font(.system(size: 8.5))
-                        .foregroundStyle(st.tint)
-                        .frame(width: 15, height: 15)
-                        .background(st.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        .help(a)
+                    if let icon = AgentRegistry.appIcon(for: a) {
+                        Image(nsImage: icon).resizable().interpolation(.high)
+                            .frame(width: 15, height: 15)
+                            .help(a)
+                    } else {
+                        let st = AgentRegistry.style(for: a)
+                        Image(systemName: st.symbol)
+                            .font(.system(size: 8.5))
+                            .foregroundStyle(st.tint)
+                            .frame(width: 15, height: 15)
+                            .background(st.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .help(a)
+                    }
                 }
             }
         }
