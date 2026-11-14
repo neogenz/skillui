@@ -21,6 +21,7 @@ struct DashboardView: View {
     enum Nav: Hashable {
         case all, updates
         case scope(Scope)
+        case profile(String)                          // global skills a Claude profile holds
         case project(String)                          // a whole repo, every worktree
         case worktree(group: String, path: String)    // one worktree of that repo
     }
@@ -66,6 +67,15 @@ struct DashboardView: View {
                 Label("Project", systemImage: "folder")
                     .badge(scopeCounts[.project] ?? 0)
                     .tag(Nav.scope(.project))
+            }
+            if !app.claudeProfiles.isEmpty {
+                Section("Claude Profiles") {
+                    ForEach(app.claudeProfiles, id: \.self) { p in
+                        Label(p, systemImage: "person.crop.circle")
+                            .badge(dashboardSkills.filter { $0.profiles.contains(p) }.count)
+                            .tag(Nav.profile(p))
+                    }
+                }
             }
             if !groups.isEmpty {
                 Section("Projects") {
@@ -579,7 +589,7 @@ struct DashboardView: View {
     /// multi-worktree project is selected, hidden once the scope is a single worktree (pure repetition).
     private var projectColumn: ProjectColumn {
         switch nav {
-        case .worktree: return .hidden
+        case .worktree, .profile: return .hidden   // profile rows are all global: no project
         case .project(let g): return worktrees(in: g).count > 1 ? .worktree : .hidden
         default: return .project
         }
@@ -589,6 +599,7 @@ struct DashboardView: View {
         switch nav {
         case .updates: return "Updates"
         case .scope(let s): return s.label
+        case .profile(let p): return "Profile · \(p)"
         case .project(let p): return p
         case .worktree(_, let p): return (p as NSString).lastPathComponent
         case .all, .none: return "All Skills"
@@ -614,6 +625,7 @@ struct DashboardView: View {
         switch nav {
         case .updates: r = r.filter { app.effectiveStatus(for: $0) == .updateAvailable }
         case .scope(let s): r = r.filter { $0.scope == s }
+        case .profile(let p): r = r.filter { $0.profiles.contains(p) }
         case .project(let p): r = r.filter { $0.projectGroup == p }
         case .worktree(let g, let p): r = r.filter { $0.projectGroup == g && ($0.projectPath ?? "") == p }
         case .all, .none: break
